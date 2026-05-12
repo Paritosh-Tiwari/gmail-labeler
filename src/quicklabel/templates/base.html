@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>{% block title %}QuickLabel{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            --bg: #fafafa; --fg: #222; --muted: #666; --border: #ddd;
+            --accent: #2a6df4; --accent-bg: #e8f0fe; --good: #1e8e3e; --warn: #d97706;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg); color: var(--fg);
+            margin: 0; padding: 32px 16px; line-height: 1.5;
+        }
+        .wrap { max-width: 720px; margin: 0 auto; }
+        h1 { font-size: 22px; margin: 0 0 8px; }
+        h2 { font-size: 16px; margin: 24px 0 8px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+        .card {
+            background: white; border: 1px solid var(--border);
+            border-radius: 8px; padding: 20px; margin: 16px 0;
+        }
+        .meta { color: var(--muted); font-size: 13px; }
+        .meta strong { color: var(--fg); font-weight: 500; }
+        label { display: block; margin: 14px 0 4px; font-weight: 500; font-size: 14px; }
+        input[type="text"] {
+            width: 100%; padding: 8px 10px; font-size: 14px;
+            border: 1px solid var(--border); border-radius: 4px;
+            font-family: ui-monospace, monospace;
+        }
+        input[type="text"]:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+        button, .btn {
+            background: var(--accent); color: white; border: none;
+            padding: 10px 20px; border-radius: 4px; cursor: pointer;
+            font-size: 14px; font-weight: 500;
+        }
+        button.secondary { background: white; color: var(--fg); border: 1px solid var(--border); }
+        button:hover { opacity: 0.92; }
+        .question {
+            background: var(--accent-bg); border-left: 3px solid var(--accent);
+            padding: 12px 16px; margin: 12px 0; border-radius: 4px;
+        }
+        .question .opts { margin-top: 8px; }
+        .question label.opt { display: block; font-weight: normal; margin: 4px 0; cursor: pointer; }
+        code, .mono { font-family: ui-monospace, "SF Mono", monospace; font-size: 13px; background: #f1f1f1; padding: 1px 5px; border-radius: 3px; }
+        .rationale { color: var(--muted); font-size: 13px; font-style: italic; margin-top: 4px; }
+        .checkbox { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-weight: normal; }
+        .footer { color: var(--muted); font-size: 12px; margin-top: 32px; text-align: center; }
+        .badge { display: inline-block; background: var(--accent-bg); color: var(--accent); padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; }
+        .badge.good { background: #e6f4ea; color: var(--good); }
+        .badge.warn { background: #fef7e0; color: var(--warn); }
+        .badge.uncertain { background: #fce8e6; color: #c5221f; }
+        .ai-block { background: var(--accent-bg); border-left: 3px solid var(--accent); padding: 10px 14px; margin: 8px 0 14px; border-radius: 4px; font-size: 13px; }
+        .ai-block .ai-label { font-weight: 600; color: var(--accent); margin-right: 6px; }
+        .hero { background: white; border: 1px solid var(--border); border-radius: 8px; padding: 24px; margin: 16px 0; }
+        .hero-label { font-size: 22px; font-weight: 600; margin-bottom: 8px; line-height: 1.3; }
+        .hero-label .badge { font-size: 12px; vertical-align: middle; margin-left: 6px; font-weight: 500; }
+        .hero-label-text { color: var(--fg); }
+        .hero-summary { color: var(--muted); font-size: 14px; margin-top: 4px; }
+        .hero-summary code { font-size: 12px; }
+        .warn-inline { background: #fef7e0; border-left: 3px solid var(--warn); padding: 10px 14px; border-radius: 4px; font-size: 13px; color: var(--fg); }
+        .queue-row { background: white; border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; margin: 10px 0; }
+        .queue-row-head { margin-bottom: 10px; }
+        .queue-row-label { font-size: 16px; line-height: 1.3; margin-bottom: 4px; }
+        .queue-row-label .badge { font-size: 11px; vertical-align: middle; margin-left: 4px; font-weight: 500; }
+        .queue-row-meta { color: var(--muted); font-size: 13px; }
+        .queue-row-meta code { font-size: 12px; }
+        .queue-row-subject { color: var(--fg); font-size: 13px; margin-top: 4px; line-height: 1.4; }
+        .queue-row-preview { color: var(--muted); font-size: 12px; margin-top: 4px; font-style: italic; line-height: 1.4; }
+        .queue-row-current { background: #fef7e0; border-left: 3px solid var(--warn); padding: 6px 10px; margin-top: 8px; border-radius: 4px; font-size: 12px; color: var(--fg); }
+        .queue-row-current code { font-size: 12px; }
+        .queue-row-extras { background: var(--accent-bg); border-left: 3px solid var(--accent); padding: 6px 10px; margin-top: 6px; border-radius: 4px; font-size: 12px; color: var(--fg); }
+        .flash-success { background: #e6f4ea; border-left: 3px solid var(--good); padding: 12px 16px; margin: 16px 0; border-radius: 4px; font-size: 14px; }
+        .queue-row-actions { display: flex; gap: 6px; }
+        .queue-row-actions button { padding: 6px 14px; font-size: 13px; }
+        .queue-row-tools { display: flex; gap: 16px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #f0f0f0; }
+        .link-btn { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font-size: 12px; text-decoration: none; }
+        .link-btn:hover { text-decoration: underline; }
+        .queue-row-edit { padding: 12px 0; border-top: 1px solid var(--border); margin-top: 10px; margin-bottom: 10px; }
+        .queue-row-edit > label { font-size: 13px; }
+        .stat { display: inline-block; margin-right: 16px; }
+        .action-row { display: flex; flex-wrap: wrap; gap: 12px 20px; margin-top: 6px; }
+        .action-row label.opt, .action-row label.checkbox {
+            font-weight: normal; cursor: pointer; margin: 0; display: inline-flex;
+            align-items: center; gap: 6px; font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        {% block content %}{% endblock %}
+        <div class="footer">QuickLabel runs on 127.0.0.1 only. No data leaves your machine.</div>
+    </div>
+</body>
+</html>

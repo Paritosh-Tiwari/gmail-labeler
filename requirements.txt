@@ -1,0 +1,36 @@
+# Gmail API
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+
+# Local LLM client (talks to Ollama at localhost:11434)
+ollama
+
+# Embeddings storage
+sqlite-vec
+
+# Clustering
+hdbscan
+scikit-learn
+numpy
+
+# Local review UI (Stage 5 + Stage 7)
+fastapi
+uvicorn
+jinja2
+python-multipart
+
+# Config
+python-dotenv
+
+# OS keyring for QuickLabel OAuth refresh-token storage
+# (Windows Credential Manager / macOS Keychain — keeps the token
+# out of plaintext files that can leak via folder zips / cloud sync)
+keyring
+
+# System tray icon (`python -m quicklabel tray`)
+pystray
+pillow
+
+# Progress bars
+tqdm

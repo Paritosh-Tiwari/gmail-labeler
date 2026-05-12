@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Audit log — QuickLabel{% endblock %}
+{% block content %}
+<h1>Audit log</h1>
+<p class="meta">
+    Last {{ entries|length }} HTTP requests this server handled. Useful for
+    spotting weird traffic. <strong>Any row with a non-localhost <code>Host</code>
+    header (or marked <span style="color: var(--warn);">blocked</span>) is a
+    DNS-rebinding attempt or external probe</strong> — investigate.
+</p>
+
+{% if not entries %}
+<div class="card"><p class="meta">No requests logged yet.</p></div>
+{% endif %}
+
+<div class="card" style="overflow-x: auto;">
+<table style="width: 100%; border-collapse: collapse; font-size: 12px; font-family: ui-monospace, monospace;">
+    <thead>
+        <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+            <th style="padding: 6px 8px;">Time (UTC)</th>
+            <th style="padding: 6px 8px;">Method</th>
+            <th style="padding: 6px 8px;">Path</th>
+            <th style="padding: 6px 8px;">Host</th>
+            <th style="padding: 6px 8px;">Status</th>
+            <th style="padding: 6px 8px;">Origin</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for e in entries %}
+        <tr style="border-bottom: 1px solid #f0f0f0; {% if e.blocked %}background: #fce8e6;{% endif %}">
+            <td style="padding: 6px 8px;">{{ e.ts }}</td>
+            <td style="padding: 6px 8px;">{{ e.method }}</td>
+            <td style="padding: 6px 8px;">{{ e.path }}</td>
+            <td style="padding: 6px 8px;">{{ e.host or '(none)' }}</td>
+            <td style="padding: 6px 8px;">
+                {{ e.status }}
+                {% if e.blocked %}<span class="badge uncertain">BLOCKED</span>{% endif %}
+            </td>
+            <td style="padding: 6px 8px;">{{ e.origin or '' }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+
+<p class="meta" style="margin-top: 24px;">
+    <a href="/">&larr; Back to landing</a>
+</p>
+{% endblock %}

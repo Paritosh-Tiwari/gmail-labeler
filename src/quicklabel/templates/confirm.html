@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Confirm — QuickLabel{% endblock %}
+{% block content %}
+<h1>Confirm before applying</h1>
+
+<div class="card">
+    <h2>What will happen</h2>
+    <p><strong>Label:</strong> <code>{{ label_name }}</code></p>
+    <p><strong>Filter query:</strong> <code>{{ filter_query }}</code></p>
+    <p><strong>Scope:</strong>
+        {% if scope == 'future_only' %}Future mail only (create filter, no back-prop)
+        {% elif scope == 'existing_only' %}Existing only (back-prop, no filter)
+        {% else %}Future + existing (filter + back-prop)
+        {% endif %}
+    </p>
+
+    {% if action_summary %}
+    <p><strong>Additional actions:</strong></p>
+    <ul>
+        {% for line in action_summary %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if scope in ('existing_only', 'both') and backprop_count > 0 %}
+    <p><strong>Existing emails affected:</strong>
+        <span class="badge {% if is_destructive_flag %}uncertain{% else %}good{% endif %}">{{ backprop_count }}</span>
+    </p>
+    {% endif %}
+</div>
+
+{% if conflicts %}
+<div class="card" style="border-left: 4px solid var(--warn);">
+    <h2 style="color: var(--warn);">&#9888; Conflicting filter(s) already exist</h2>
+    <p>
+        Gmail already has the following filter(s) on the same sender/list.
+        By default, your new filter will be created <strong>alongside</strong>
+        the existing one(s) — both will run on incoming mail, and emails
+        will end up with multiple labels and possibly conflicting actions.
+    </p>
+    <ul>
+        {% for c in conflicts %}
+        <li>
+            <code>{{ c.criteria }}</code>
+            <span class="meta">&rarr; {{ c.action }}</span>
+            (filter id: <code>{{ c.id }}</code>)
+        </li>
+        {% endfor %}
+    </ul>
+    <p style="margin-top: 12px;">
+        <label class="checkbox" style="font-weight: 500;">
+            <input type="checkbox" id="replace-conflicts-toggle"
+                   {% if scope in ('existing_only', 'both') %}checked{% endif %}>
+            Delete the existing filter(s) and replace with this new one (recommended when overwriting)
+        </label>
+    </p>
+    <p class="meta" style="font-size: 12px;">
+        Replacing only deletes the filter rule. Labels already applied to
+        existing emails by the old filter stay until you remove them
+        manually (or use Undo on this apply).
+    </p>
+</div>
+{% endif %}
+
+{% if choices and (choices.inbox in ('skip', 'trash') or choices.importance == 'never_important')
+   and scope in ('existing_only', 'both') and backprop_count > 0 %}
+<div class="card" style="border-left: 4px solid #c5221f;">
+    <h2 style="color: #c5221f;">&#9888; Hard-to-undo action on existing mail</h2>
+    <p>
+        Applying this will retroactively
+        {% if choices.inbox == 'skip' %}<strong>archive (remove from inbox)</strong>{% endif %}
+        {% if choices.inbox == 'trash' %}<strong>move to trash</strong>{% endif %}
+        {% if choices.importance == 'never_important' %}<strong>downgrade importance on</strong>{% endif %}
+        <strong>{{ backprop_count }}</strong> existing emails matching <code>{{ filter_query }}</code>.
+    </p>
+    <p class="meta">
+        Archived/trashed mail isn't deleted — it's findable via Gmail search
+        and "All Mail". You can also Undo this whole apply from the
+        <a href="/history">History</a> page (one click reverses both the
+        filter creation and these label changes).
+    </p>
+</div>
+{% endif %}
+
+<form method="POST" action="{{ resubmit_action }}" style="margin-top: 16px;" id="confirm-form">
+    {# Re-submit all original form fields with confirmed=yes set. #}
+    <input type="hidden" name="confirmed" value="yes">
+    <input type="hidden" name="replace_conflicts" id="replace-conflicts-field" value="no">
+    {% for k, v in form_fields.items() %}
+    <input type="hidden" name="{{ k }}" value="{{ v }}">
+    {% endfor %}
+    <div style="display: flex; gap: 8px;">
+        <button type="submit">Confirm and apply</button>
+        <button type="button" class="secondary" onclick="history.back()">Cancel — go back</button>
+    </div>
+</form>
+
+{% if conflicts %}
+<script>
+// Mirror the toggle into the hidden form field that gets submitted
+(function () {
+    var toggle = document.getElementById('replace-conflicts-toggle');
+    var hidden = document.getElementById('replace-conflicts-field');
+    function sync() { hidden.value = toggle.checked ? 'yes' : 'no'; }
+    toggle.addEventListener('change', sync);
+    sync();
+})();
+</script>
+{% endif %}
+{% endblock %}

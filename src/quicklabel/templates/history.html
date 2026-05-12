@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}History — QuickLabel{% endblock %}
+{% block content %}
+<h1>Apply history</h1>
+<p class="meta">
+    Most recent first. Undo deletes the filter (if any) and reverses the
+    label changes on the message set captured at apply time.
+</p>
+
+{% if not entries %}
+<div class="card">
+    <p class="meta">No applies yet.</p>
+</div>
+{% endif %}
+
+{% for e in entries %}
+<div class="card">
+    <p class="meta" style="margin-bottom: 4px;">
+        <strong>{{ e.applied_at }}</strong>
+        {% if e.undone_at %}
+            <span class="badge uncertain">undone {{ e.undone_at }}</span>
+        {% endif %}
+    </p>
+    <p>
+        <strong>Label:</strong> <code>{{ e.label_name }}</code>
+        <br><strong>Filter:</strong> <code>{{ e.filter_query }}</code>
+        {% if e.filter_id %}
+            <span class="meta">(filter id: {{ e.filter_id }})</span>
+        {% endif %}
+        <br><strong>Scope:</strong> {{ e.apply_scope }}
+        {% if e.backprop_message_ids %}
+            · <span class="badge">{{ e.backprop_message_ids|length }} messages</span>
+        {% endif %}
+        {% if e.action_summary %}
+            <br><span class="meta">Actions: {{ e.action_summary }}</span>
+        {% endif %}
+    </p>
+    {% if not e.undone_at %}
+    <form method="POST" action="/history/undo" style="margin-top: 8px;">
+        <input type="hidden" name="nonce" value="{{ nonce }}">
+        <input type="hidden" name="apply_id" value="{{ e.id }}">
+        <button type="submit" class="secondary">Undo</button>
+    </form>
+    {% endif %}
+</div>
+{% endfor %}
+
+<p class="meta" style="margin-top: 24px;">
+    <a href="/">&larr; Back to landing</a>
+</p>
+{% endblock %}

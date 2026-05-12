@@ -1,0 +1,61 @@
+{# Reusable filter-actions UI block. Include from inside a <form>.
+   Reads from `suggested_actions` if defined; falls back to all-defaults.
+   Common actions visible by default; rare ones tucked under "Show advanced". #}
+{% set sa = suggested_actions if suggested_actions is defined else None %}
+<div class="card">
+    <h2>Additional actions</h2>
+    <p class="meta" style="margin-top:-4px;">
+        These apply to both the new filter (future mail) and to the existing
+        emails being back-propagated.
+    </p>
+
+    <label style="margin-top:14px;">Inbox</label>
+    <div class="action-row">
+        <label class="opt"><input type="radio" name="inbox_action" value="keep"
+            {% if not sa or sa.inbox == 'keep' %}checked{% endif %}> Keep in inbox</label>
+        <label class="opt"><input type="radio" name="inbox_action" value="skip"
+            {% if sa and sa.inbox == 'skip' %}checked{% endif %}> Skip inbox (auto-archive)</label>
+    </div>
+
+    <div class="action-row" style="margin-top: 14px;">
+        <label class="checkbox"><input type="checkbox" name="mark_read" value="yes"
+            {% if sa and sa.mark_read %}checked{% endif %}> Mark as read</label>
+    </div>
+
+    <label style="margin-top:14px;">Categorize as</label>
+    <select name="categorize_action" style="padding: 6px; font-size: 14px;">
+        <option value="none"       {% if not sa or sa.categorize == 'none' %}selected{% endif %}>None</option>
+        <option value="personal"   {% if sa and sa.categorize == 'personal' %}selected{% endif %}>Personal</option>
+        <option value="social"     {% if sa and sa.categorize == 'social' %}selected{% endif %}>Social</option>
+        <option value="promotions" {% if sa and sa.categorize == 'promotions' %}selected{% endif %}>Promotions</option>
+        <option value="updates"    {% if sa and sa.categorize == 'updates' %}selected{% endif %}>Updates</option>
+        <option value="forums"     {% if sa and sa.categorize == 'forums' %}selected{% endif %}>Forums</option>
+    </select>
+
+    <details style="margin-top: 16px;">
+        <summary style="cursor: pointer; color: var(--accent); font-size: 13px;">Show advanced (trash, importance, star, spam)</summary>
+
+        <div class="action-row" style="margin-top: 10px;">
+            <label class="opt"><input type="radio" name="inbox_action" value="trash"
+                {% if sa and sa.inbox == 'trash' %}checked{% endif %}>
+                <span style="color:var(--warn)">Move to trash (auto-delete)</span></label>
+        </div>
+
+        <label style="margin-top:14px;">Importance</label>
+        <div class="action-row">
+            <label class="opt"><input type="radio" name="importance_action" value="default"
+                {% if not sa or sa.importance == 'default' %}checked{% endif %}> Default</label>
+            <label class="opt"><input type="radio" name="importance_action" value="important"
+                {% if sa and sa.importance == 'important' %}checked{% endif %}> Mark as important</label>
+            <label class="opt"><input type="radio" name="importance_action" value="never_important"
+                {% if sa and sa.importance == 'never_important' %}checked{% endif %}> Never mark as important</label>
+        </div>
+
+        <div class="action-row" style="margin-top: 14px;">
+            <label class="checkbox"><input type="checkbox" name="star" value="yes"
+                {% if sa and sa.star %}checked{% endif %}> Star</label>
+            <label class="checkbox"><input type="checkbox" name="never_spam" value="yes"
+                {% if sa and sa.never_spam %}checked{% endif %}> Never send to spam</label>
+        </div>
+    </details>
+</div>

@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Settings · QuickLabel{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<p class="meta">
+    Stored in <code>{{ settings_path }}</code>. Environment variables (e.g. <code>QUICKLABEL_PORT</code>)
+    override the file at launch time.
+</p>
+
+{% if saved %}
+<div class="flash-success">
+    Settings saved. <strong>Restart the server</strong> for port and log-level changes to take effect.
+    Model changes apply on the next proposal.
+</div>
+{% endif %}
+
+{% if test_result %}
+<div class="card" style="border-left: 3px solid {% if test_result.ok %}var(--good){% else %}#c5221f{% endif %};">
+    <h2>Test: <code>{{ test_model_name }}</code></h2>
+    {% if test_result.ok %}
+    <p>
+        <span class="badge good">✓ Responded</span>
+        in {{ test_result.latency_ms }} ms
+    </p>
+    <p style="font-size: 13px; color: var(--muted);">Response (truncated to first line):</p>
+    <pre style="background:#f1f1f1; padding:10px; border-radius:4px; font-size:12px; overflow-x:auto;">{{ test_result.response[:200] }}</pre>
+    {% else %}
+    <p>
+        <span class="badge uncertain">✗ Failed</span>
+        {% if test_result.latency_ms %} after {{ test_result.latency_ms }} ms{% endif %}
+    </p>
+    <p style="font-size: 13px; color: var(--fg);">{{ test_result.error }}</p>
+    {% endif %}
+</div>
+{% endif %}
+
+<form method="post" action="/settings">
+    <input type="hidden" name="nonce" value="{{ nonce }}">
+
+    <div class="card">
+        <h2>LLM model</h2>
+        <label for="llm_model">Ollama model name</label>
+        <input type="text" id="llm_model" name="llm_model" value="{{ settings.llm_model }}"
+               list="model_suggestions">
+        <datalist id="model_suggestions">
+            {% if installed %}
+                {% for m in installed %}
+                <option value="{{ m.name }}">{% if m.size_gb %}{{ m.size_gb }} GB installed{% endif %}</option>
+                {% endfor %}
+            {% else %}
+                <option value="gpt-oss:20b">~13 GB</option>
+                <option value="qwen2.5:7b-instruct">~5 GB</option>
+                <option value="qwen2.5:3b-instruct">~2 GB</option>
+            {% endif %}
+        </datalist>
+
+        <p style="margin-top: 10px;">
+            {% if model_status == "installed" %}
+                <span class="badge good">✓ Installed{% if current_size_gb %} ({{ current_size_gb }} GB){% endif %}</span>
+            {% elif model_status == "not_installed" %}
+                <span class="badge warn">⚠ Not installed</span>
+                — pull with <code>ollama pull {{ settings.llm_model }}</code>
+            {% elif model_status == "ollama_down" %}
+                <span class="badge uncertain">⚠ Ollama not reachable</span>
+                — start Ollama before using QuickLabel
+            {% endif %}
+        </p>
+
+        <p class="meta" style="margin-top: 12px;">
+            Recommended models in install order:
+            <code>gpt-oss:20b</code> (~13 GB, ≥16 GB VRAM, best quality),
+            <code>qwen2.5:7b-instruct</code> (~5 GB, ≥6 GB VRAM),
+            <code>qwen2.5:3b-instruct</code> (~2 GB, CPU-OK but slower).
+        </p>
+
+        <p style="margin-top: 14px;">
+            <button type="submit" formaction="/settings/test-llm" class="btn secondary"
+                    style="background: white; color: var(--fg); border: 1px solid var(--border); padding: 6px 14px; font-size: 13px;">
+                Test this model
+            </button>
+            <span class="meta" style="margin-left: 8px; font-size: 12px;">
+                Sends a tiny prompt and shows the response. First call to a freshly-loaded model can take ~30s.
+            </span>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Server</h2>
+        <label for="port">Port</label>
+        <input type="text" id="port" name="port" value="{{ settings.port }}" inputmode="numeric"
+               pattern="[0-9]+" style="max-width: 200px;">
+        <p class="meta" style="margin-top: 8px;">
+            Default <code>8765</code>. Change if another app on this machine already uses
+            this port. Bookmarklet must be re-dragged after a port change.
+        </p>
+
+        <label for="log_level" style="margin-top: 16px;">Log verbosity</label>
+        <select id="log_level" name="log_level"
+                style="padding: 8px 10px; font-size: 14px; border: 1px solid var(--border); border-radius: 4px;">
+            {% for lvl in ["DEBUG", "INFO", "WARNING", "ERROR"] %}
+            <option value="{{ lvl }}" {% if settings.log_level == lvl %}selected{% endif %}>{{ lvl }}</option>
+            {% endfor %}
+        </select>
+        <p class="meta" style="margin-top: 8px;">
+            Logs go to <code>data/quicklabel.log</code> (5&nbsp;MB × 3 backups).
+            Bump to <code>DEBUG</code> when troubleshooting.
+        </p>
+    </div>
+
+    <div class="card">
+        <button type="submit">Save settings</button>
+        &nbsp;
+        <a href="/" class="btn secondary"
+           style="background: white; color: var(--fg); border: 1px solid var(--border);">Cancel</a>
+    </div>
+</form>
+{% endblock %}

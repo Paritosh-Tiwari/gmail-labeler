@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Undone — QuickLabel{% endblock %}
+{% block content %}
+<h1>Undone</h1>
+
+<div class="card">
+    <p>Reversed:</p>
+    <ul>
+        {% if entry.filter_id %}<li>Deleted filter <code>{{ entry.filter_id }}</code></li>{% endif %}
+        {% if entry.backprop_message_ids %}
+        <li>Reversed label changes on <strong>{{ entry.backprop_message_ids|length }}</strong> messages
+            (label: <code>{{ entry.label_name }}</code>)</li>
+        {% endif %}
+    </ul>
+    {% if errors %}
+    <p style="color: var(--warn);">Some operations failed:</p>
+    <ul>
+        {% for err in errors %}<li><code>{{ err }}</code></li>{% endfor %}
+    </ul>
+    {% endif %}
+</div>
+
+<p><a href="/history">&larr; Back to history</a></p>
+{% endblock %}

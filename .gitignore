@@ -1,0 +1,43 @@
+# Credentials & tokens — NEVER commit
+credentials.json
+token.json
+.env
+
+# Databases (may contain email content)
+*.db
+*.sqlite
+*.sqlite3
+
+# Data directories (email bodies, embeddings, taxonomies)
+data/
+emails/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node / web UI deps (if any)
+node_modules/
+
+# Logs
+*.log
+
+# Trained model checkpoints (regenerable from train script + DB labels)
+models/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Claude Code session state (lock files, local settings)
+.claude/
+
+# Local-only git archive of pre-publish history
+.git-archive/

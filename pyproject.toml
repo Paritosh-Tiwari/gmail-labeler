@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quicklabel"
+version = "0.1.0"
+description = "Local Gmail labeling assistant — bookmarklet + LLM-backed proposals."
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+# Only the packages QuickLabel actually needs at runtime — the rest of
+# the parent project (stage*.py, ui/) lives under src/ but isn't part
+# of the QuickLabel install surface.
+include = ["quicklabel*", "lib*"]

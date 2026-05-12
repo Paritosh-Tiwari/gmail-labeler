@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% block title %}Label proposal — QuickLabel{% endblock %}
+{% block content %}
+
+{# ----- compute friendly flags up-front so the body stays readable ----- #}
+{% set high_conf = intel and intel.confidence >= 0.8 %}
+{% set existing_kind = label_status_value in ('existing', 'extends_existing') %}
+{% set ai_can_collapse = intel and high_conf and existing_kind %}
+{% set est_count = proposal.filter.estimated_match_count %}
+
+<form method="POST" action="/apply" id="proposal-form"
+      data-existing-count="{{ est_count }}">
+    <input type="hidden" name="nonce" value="{{ nonce }}">
+
+    {# ============== HERO: label + apply, above the fold ============== #}
+    <div class="hero">
+        <div class="hero-label">
+            <span class="hero-label-text">{{ proposal.label.suggested_parent + '/' if proposal.label.suggested_parent else '' }}{{ proposal.label.suggested_name }}</span>
+            {% if label_status_value == "existing" %}
+                <span class="badge good">&#10003; existing</span>
+            {% elif label_status_value == "extends_existing" %}
+                <span class="badge">&#8627; extends existing</span>
+            {% else %}
+                <span class="badge warn">+ new label</span>
+            {% endif %}
+            {% if intel and intel.confidence < 0.6 %}
+                <span class="badge uncertain">uncertain &mdash; please verify</span>
+            {% endif %}
+        </div>
+
+        <div class="hero-summary">
+            From <strong>{{ email.sender_email }}</strong>
+            {% if email.sender_name %}({{ email.sender_name }}){% endif %}
+            &middot; <strong>{{ stats.total_from_sender }}</strong> prior emails
+            {% if email.list_id %}&middot; list:<code>{{ email.list_id }}</code>{% endif %}
+        </div>
+
+        <div class="hero-summary" style="margin-top: 8px;">
+            <strong>Subject:</strong> {{ email.subject }}
+        </div>
+        {% if body_preview %}
+        <div class="hero-summary" style="font-style: italic; margin-top: 4px;">
+            {{ body_preview }}{% if body_preview|length >= 400 %}...{% endif %}
+        </div>
+        {% endif %}
+
+        <div class="hero-summary" style="margin-top: 12px;">
+            Will label <strong id="will-label-count">{{ est_count }}</strong> existing emails
+            {% if intel and intel.suggested_actions %}
+                {% set sa = intel.suggested_actions %}
+                {% set extras = [] %}
+                {% if sa.inbox == 'skip' %}{% set _ = extras.append('skip inbox') %}{% endif %}
+                {% if sa.inbox == 'trash' %}{% set _ = extras.append('move to trash') %}{% endif %}
+                {% if sa.mark_read %}{% set _ = extras.append('mark as read') %}{% endif %}
+                {% if sa.categorize != 'none' %}{% set _ = extras.append('categorize as ' + sa.categorize) %}{% endif %}
+                {% if extras %}&middot; {{ extras | join(' &middot; ') | safe }}{% endif %}
+            {% endif %}
+        </div>
+
+        {# Show rationale prominently only when AI is uncertain or proposing a new top-level label #}
+        {% if intel and not ai_can_collapse %}
+        <div class="rationale" style="margin-top: 8px;">{{ intel.rationale }}</div>
+        {% if signals and signals.describe() %}
+        <div style="color: var(--muted); font-size: 12px; margin-top: 4px;">
+            Signals: {{ signals.describe() | join(' &middot; ') | safe }}
+        </div>
+        {% endif %}
+        {% endif %}
+
+        {# Inline destructive warning. JS confirm() picks this up on submit. #}
+        <div id="destructive-warning" class="warn-inline" style="display: none; margin-top: 12px;"></div>
+
+        <div style="display: flex; gap: 8px; margin-top: 16px; align-items: center; flex-wrap: wrap;">
+            <button type="submit" id="apply-btn" style="font-size: 16px; padding: 12px 28px;">Apply</button>
+            <button type="button" class="secondary" onclick="window.close()">Cancel</button>
+            {# `formaction` overrides the form's action just for this button.
+               Submitting Regenerate sends all current form fields to
+               /label/regenerate, which only reads nonce + id and ignores
+               the rest. This avoids nesting forms (illegal in HTML). #}
+            <button type="submit" formaction="/label/regenerate"
+                    formnovalidate
+                    name="id" value="{{ raw_id }}"
+                    class="link-btn" style="font-size: 13px; margin-left: 8px;">
+                &#10024; Regenerate with AI
+            </button>
+            <span class="meta" style="font-size: 12px;">
+                (busts cache, re-runs LLM)
+            </span>
+            {% if ai_can_collapse %}
+            <span class="meta" style="margin-left: 8px; font-size: 12px; flex-basis: 100%;">
+                AI: {{ intel.rationale }}
+            </span>
+            {% endif %}
+        </div>
+    </div>
+
+    {# ============== Optional clarifying questions ============== #}
+    {% if questions %}
+    <div class="card" style="margin-top: 24px;">
+        <h2>Quick question{{ 's' if questions|length > 1 else '' }}</h2>
+        {% for q in questions %}
+        <div class="question">
+            <div>{{ q.text }}</div>
+            <div class="opts">
+                {% for opt in q.options %}
+                <label class="opt">
+                    <input type="radio" name="q{{ loop.index0 }}" value='{{ opt.value | tojson }}'
+                           {% if loop.first %}checked{% endif %}
+                           onchange="applyQuestionChoice(this)">
+                    {{ opt.label }}
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# ============== CUSTOMIZE: collapsed by default ============== #}
+    <details style="margin-top: 24px;">
+        <summary style="cursor: pointer; color: var(--accent); font-weight: 500;">
+            Customize label, filter, scope &amp; actions
+        </summary>
+
+        <div style="margin-top: 16px;">
+            <h2>Label</h2>
+            <div class="card">
+                <label>Parent label (optional, will create if missing)</label>
+                <input type="text" name="parent_label" value="{{ proposal.label.suggested_parent or '' }}"
+                       placeholder="e.g. AI Newsletters">
+
+                <label>Label name</label>
+                <input type="text" name="label_name" value="{{ proposal.label.suggested_name }}" required>
+            </div>
+
+            <h2>Filter</h2>
+            <div class="card">
+                <label>Gmail search query (will become a filter)</label>
+                <input type="text" name="filter_query" id="filter_query" value="{{ proposal.filter.query }}" required>
+                <div class="rationale">{{ proposal.filter.rationale }}</div>
+            </div>
+
+            {% include "_scope.html" %}
+            {% include "_actions.html" %}
+
+            {% if intel %}
+            <details style="margin-top: 16px;">
+                <summary style="cursor: pointer; color: var(--accent); font-size: 12px;">
+                    AI details (model, prompt, raw response)
+                </summary>
+                <div style="margin-top: 8px; font-size: 12px; color: var(--muted);">
+                    <strong>Model:</strong> <code>{{ intel.model }}</code>
+                    &middot; <strong>Confidence:</strong> {{ '%.0f'|format(intel.confidence * 100) }}%
+                </div>
+                <div style="margin-top: 8px;">
+                    <strong style="font-size: 12px;">Prompt sent:</strong>
+                    <pre style="background: white; border: 1px solid var(--border); padding: 8px; border-radius: 4px; max-height: 300px; overflow: auto; font-size: 11px; white-space: pre-wrap;">{{ intel.prompt }}</pre>
+                </div>
+                {% if intel.raw_response %}
+                <div style="margin-top: 8px;">
+                    <strong style="font-size: 12px;">Raw response:</strong>
+                    <pre style="background: white; border: 1px solid var(--border); padding: 8px; border-radius: 4px; max-height: 300px; overflow: auto; font-size: 11px; white-space: pre-wrap;">{{ intel.raw_response }}</pre>
+                </div>
+                {% endif %}
+            </details>
+            {% endif %}
+        </div>
+    </details>
+</form>
+
+<script>
+function applyQuestionChoice(radio) {
+    try {
+        var v = JSON.parse(radio.value);
+        var c = v.criteria || {};
+        if (c.query) {
+            document.getElementById('filter_query').value = c.query;
+        } else {
+            var q = '';
+            if (c.from) { q += 'from:' + c.from; }
+            if (c.subject) { q += (q ? ' ' : '') + 'subject:"' + c.subject + '"'; }
+            document.getElementById('filter_query').value = q;
+        }
+    } catch (e) { console.error(e); }
+}
+
+// Inline destructive warning + JS confirm on submit
+(function () {
+    var form = document.getElementById('proposal-form');
+    if (!form) return;
+    var existingCount = parseInt(form.dataset.existingCount || '0', 10);
+    var warnEl = document.getElementById('destructive-warning');
+
+    function currentRadioValue(name, dflt) {
+        var el = form.querySelector('input[name="' + name + '"]:checked');
+        return el ? el.value : dflt;
+    }
+
+    function recompute() {
+        var inbox = currentRadioValue('inbox_action', 'keep');
+        var importance = currentRadioValue('importance_action', 'default');
+        var scope = currentRadioValue('apply_scope', 'both');
+        var affectsExisting = (scope === 'existing_only' || scope === 'both');
+        var destructive = (inbox === 'skip' || inbox === 'trash' || importance === 'never_important');
+
+        if (destructive && affectsExisting && existingCount > 50) {
+            var verb = inbox === 'trash' ? 'move to trash' :
+                       inbox === 'skip' ? 'archive (skip inbox on)' :
+                       'mark not-important on';
+            warnEl.textContent = '⚠ Will ' + verb + ' ' + existingCount + ' existing emails. Hard to undo manually.';
+            warnEl.style.display = 'block';
+        } else {
+            warnEl.style.display = 'none';
+        }
+    }
+    form.addEventListener('change', recompute);
+    recompute();
+
+    form.addEventListener('submit', function (e) {
+        var inbox = currentRadioValue('inbox_action', 'keep');
+        var importance = currentRadioValue('importance_action', 'default');
+        var scope = currentRadioValue('apply_scope', 'both');
+        var affectsExisting = (scope === 'existing_only' || scope === 'both');
+        var destructive = (inbox === 'skip' || inbox === 'trash' || importance === 'never_important');
+
+        // Trash always goes through the server-side confirm page; don't double-prompt.
+        if (inbox === 'trash') return;
+
+        if (destructive && affectsExisting && existingCount > 50) {
+            var msg = 'About to apply to ' + existingCount + ' existing emails — continue?';
+            if (!confirm(msg)) {
+                e.preventDefault();
+            }
+        }
+    });
+})();
+</script>
+{% endblock %}

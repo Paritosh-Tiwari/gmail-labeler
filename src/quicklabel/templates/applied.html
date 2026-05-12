@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Applied — QuickLabel{% endblock %}
+{% block content %}
+<h1>Done.</h1>
+
+<div class="card">
+    <h2>Label</h2>
+    <p>Created/used: <code>{{ label_name }}</code></p>
+
+    <h2>Filter</h2>
+    {% if filter_created and not filter_created.error %}
+    <p>Server-side filter created. Future matching emails will get this label automatically.</p>
+    <p class="meta">Filter ID: <code>{{ filter_created.id }}</code></p>
+    {% elif filter_created and filter_created.error %}
+    <p style="color: var(--warn);">Filter creation failed: <code>{{ filter_created.error }}</code></p>
+    {% else %}
+    <p class="meta">No filter created (scope was &ldquo;existing only&rdquo;).</p>
+    {% endif %}
+
+    <h2>Back-propagation</h2>
+    {% if backprop_count > 0 %}
+    <p>Applied to <strong>{{ backprop_count }}</strong> existing emails matching <code>{{ filter_query }}</code>.</p>
+    {% elif apply_scope == "future_only" %}
+    <p class="meta">No back-prop (scope was &ldquo;future only&rdquo;).</p>
+    {% else %}
+    <p class="meta">No existing emails matched.</p>
+    {% endif %}
+
+    {% if action_summary %}
+    <h2>Additional actions</h2>
+    <ul>
+        {% for line in action_summary %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if queue_rows_cleaned %}
+    <p class="meta">
+        Removed <strong>{{ queue_rows_cleaned }}</strong> matching row{{ 's' if queue_rows_cleaned > 1 else '' }} from the queue.
+    </p>
+    {% endif %}
+</div>
+
+<div style="display: flex; gap: 8px; margin-top: 16px;">
+    <a href="/queue" class="btn">&larr; Back to queue</a>
+    {% if apply_id %}
+    <a href="/history" class="btn secondary" style="background: white; color: var(--fg); border: 1px solid var(--border);">View in history (undo)</a>
+    {% endif %}
+    <a href="javascript:window.close()" class="btn secondary" style="background: white; color: var(--fg); border: 1px solid var(--border);">Close tab</a>
+</div>
+{% endblock %}

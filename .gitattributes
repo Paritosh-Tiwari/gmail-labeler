@@ -1,0 +1,8 @@
+# Force LF line endings on shell scripts so Mac/Linux shebangs don't
+# break when the repo is checked out on Windows (CRLF in `#!/bin/zsh\r`
+# makes the kernel look for `/bin/zsh\r`, which doesn't exist).
+*.command text eol=lf
+*.sh      text eol=lf
+
+# PowerShell handles CRLF and LF interchangeably; keep CRLF on Windows.
+*.ps1     text

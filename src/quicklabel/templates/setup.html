@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Setup · QuickLabel{% endblock %}
+{% block content %}
+<style>
+    .step { position: relative; padding-left: 56px; }
+    .step::before {
+        content: attr(data-num); position: absolute; left: 14px; top: 22px;
+        width: 28px; height: 28px; border-radius: 50%;
+        background: var(--border); color: var(--muted);
+        display: inline-flex; align-items: center; justify-content: center;
+        font-weight: 600; font-size: 14px;
+    }
+    .step.done::before { content: "✓"; background: var(--good); color: white; }
+    .step.active::before { background: var(--accent); color: white; }
+    .step.done h2 { color: var(--muted); text-decoration: line-through; }
+    .step.active { box-shadow: 0 0 0 2px var(--accent-bg); }
+    .console-link {
+        display: inline-block; background: white; border: 1px solid var(--accent);
+        color: var(--accent); padding: 6px 14px; border-radius: 4px;
+        text-decoration: none; font-size: 13px; margin: 4px 4px 4px 0;
+    }
+    .console-link:hover { background: var(--accent-bg); }
+    .filezone {
+        border: 2px dashed var(--accent); border-radius: 8px;
+        padding: 24px; text-align: center; background: var(--accent-bg);
+        margin: 12px 0;
+    }
+    .filezone input[type=file] { font-size: 14px; }
+    .scope-list {
+        font-family: ui-monospace, monospace; font-size: 12px;
+        background: white; padding: 8px 12px; border-radius: 4px;
+        border: 1px solid var(--border);
+    }
+    .err-banner {
+        background: #fce8e6; border-left: 3px solid #c5221f;
+        padding: 12px 16px; margin: 16px 0; border-radius: 4px; font-size: 14px;
+    }
+</style>
+
+<h1>Setup</h1>
+<p class="meta">
+    One-time Google OAuth setup, ~5–10 minutes. Each user creates their
+    own OAuth client — nothing is shared with anyone else.
+</p>
+
+{% if error %}<div class="err-banner"><strong>{{ error_title }}:</strong> {{ error }}</div>{% endif %}
+
+{% if state.value == 'ready' %}
+<div class="card">
+    <h2 style="color: var(--good);">✓ All set</h2>
+    <p>QuickLabel is authorized and ready. <a href="/" class="btn">Go to landing page</a></p>
+    <p class="meta" style="margin-top: 12px;">
+        Need to re-authorize (e.g. with a different Google account)?
+        Use <a href="/setup/reset">Reset auth</a>.
+    </p>
+</div>
+{% else %}
+
+<!-- Step 1: Cloud Console + download credentials -->
+<div class="card step {% if state.value == 'needs_credentials' %}active{% else %}done{% endif %}" data-num="1">
+    <h2>Create a Google Cloud OAuth client</h2>
+    <p>You'll do these in your Google account. Sign in as the Gmail address you want QuickLabel to manage.</p>
+
+    <ol style="line-height: 1.8;">
+        <li>
+            Create a new Google Cloud project.
+            <a href="https://console.cloud.google.com/projectcreate" target="_blank" class="console-link">Open project creator ↗</a>
+            <br><span class="meta">Name it anything (e.g. <code>QuickLabel</code>). No billing setup needed.</span>
+        </li>
+        <li>
+            Enable the Gmail API.
+            <a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank" class="console-link">Gmail API page ↗</a>
+            <br><span class="meta">Make sure your new project is selected in the top dropdown, then click ENABLE.</span>
+        </li>
+        <li>
+            Configure the OAuth consent screen.
+            <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" class="console-link">Consent screen ↗</a>
+            <br><span class="meta">
+                User type: <strong>External</strong>. Fill in app name + your email. Add yourself
+                under <strong>Test users</strong>. <strong>Required scopes</strong>:
+                <span class="scope-list">https://www.googleapis.com/auth/gmail.modify</span>
+                and
+                <span class="scope-list">https://www.googleapis.com/auth/gmail.settings.basic</span>
+            </span>
+        </li>
+        <li>
+            Create OAuth client ID.
+            <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="console-link">Credentials page ↗</a>
+            <br><span class="meta">
+                CREATE CREDENTIALS → OAuth client ID. Application type:
+                <strong>Desktop app</strong> (very important — Web application won't work).
+                Name it anything. Click CREATE → <strong>DOWNLOAD JSON</strong>.
+            </span>
+        </li>
+    </ol>
+
+    <p style="margin-top: 20px;"><strong>Drop the downloaded JSON file here:</strong></p>
+    <form method="post" action="/setup/credentials" enctype="multipart/form-data">
+        <input type="hidden" name="nonce" value="{{ nonce }}">
+        <div class="filezone">
+            <input type="file" name="file" accept=".json,application/json" required>
+        </div>
+        <button type="submit">Upload credentials</button>
+    </form>
+
+    {% if state.value != 'needs_credentials' %}
+    <p class="meta" style="margin-top: 12px;">
+        ✓ Credentials already on file at <code>{{ credentials_path }}</code>.
+        Re-upload to replace them.
+    </p>
+    {% endif %}
+</div>
+
+<!-- Step 2: Authorize -->
+<div class="card step {% if state.value == 'needs_authorization' %}active{% elif state.value == 'ready' %}done{% endif %}" data-num="2">
+    <h2>Authorize Gmail access</h2>
+    <p>
+        Click below to start the Google sign-in flow. A new browser tab will open;
+        sign in with the same Gmail account you used in step 1, then click
+        <strong>Continue → Allow</strong> to grant the requested scopes.
+    </p>
+    <p class="meta">
+        After you approve, you'll see a "The authentication flow has completed" page.
+        That tab can be closed; come back to this one to continue.
+    </p>
+
+    {% if state.value == 'needs_authorization' %}
+    <form method="post" action="/setup/authorize">
+        <input type="hidden" name="nonce" value="{{ nonce }}">
+        <button type="submit">Open Google sign-in</button>
+    </form>
+    <p class="meta" style="margin-top: 12px;">
+        ⚠ Heads up: this page will appear to "spin" while you're authorizing in
+        the other tab. That's expected — it's waiting for you to finish.
+    </p>
+    {% elif state.value == 'needs_credentials' %}
+    <p class="meta">Complete step 1 first.</p>
+    {% endif %}
+</div>
+
+<!-- Step 3: Verify -->
+<div class="card step {% if state.value == 'ready' %}done{% endif %}" data-num="3">
+    <h2>Verify and finish</h2>
+    {% if state.value == 'ready' %}
+    <p>QuickLabel made a test call to Gmail and it succeeded.</p>
+    <p><a href="/" class="btn">Go to landing page</a></p>
+    {% else %}
+    <p class="meta">After authorization, this step happens automatically.</p>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

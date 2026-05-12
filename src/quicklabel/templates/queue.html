@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}Queue — QuickLabel{% endblock %}
+{% block content %}
+<div style="display: flex; align-items: center; justify-content: space-between;">
+    <h1 style="margin: 0;">Inbox queue</h1>
+    <a href="/history" class="link-btn" style="font-size: 13px;">History &amp; undo &rarr;</a>
+</div>
+
+{% if flash_applied and flash_applied is string and flash_applied %}
+<div class="flash-success">
+    &#10003; Applied <code>{{ flash_applied }}</code>{% if flash_count and flash_count != "0" %} to <strong>{{ flash_count }}</strong> existing emails{% endif %}.
+    {% if flash_apply_id %}
+        <form method="POST" action="/history/undo" style="display: inline; margin-left: 12px;">
+            <input type="hidden" name="nonce" value="{{ nonce }}">
+            <input type="hidden" name="apply_id" value="{{ flash_apply_id }}">
+            <button type="submit" class="link-btn" style="color: var(--accent);">Undo</button>
+        </form>
+    {% endif %}
+</div>
+{% endif %}
+
+<p class="meta">
+    Proposals from your recent inbox mail. Already-applied (by this tool)
+    and previously-skipped senders aren't shown. Pre-existing filters are
+    surfaced so you can override their labels.
+</p>
+
+<div class="card">
+    <p class="meta">
+        <strong>Last scan:</strong> {{ last_scan_at or 'never' }}
+        &nbsp;&middot;&nbsp;
+        <strong>{{ pending|length }}</strong> pending
+    </p>
+    <form method="POST" action="/queue/refresh" style="margin-top: 12px;">
+        <input type="hidden" name="nonce" value="{{ nonce }}">
+        <label class="meta" style="display: inline; margin-right: 8px;">Look back</label>
+        <select name="hours" style="padding: 6px;">
+            <option value="6">last 6 hours</option>
+            <option value="24" selected>last 24 hours</option>
+            <option value="72">last 3 days</option>
+            <option value="168">last 7 days</option>
+        </select>
+        <button type="submit">Scan now</button>
+    </form>
+</div>
+
+{% if not pending %}
+<div class="card">
+    <p class="meta">Nothing pending. Click <strong>Scan now</strong> to look for new mail.</p>
+</div>
+{% endif %}
+
+{% for p in pending %}
+<div class="queue-row">
+    {# ---------- always-visible summary line ---------- #}
+    <div class="queue-row-head">
+        <div class="queue-row-label">
+            <strong>{{ p.proposed_label }}</strong>
+            {% set st = label_statuses.get(p.id) %}
+            {% if st == "existing" %}
+                <span class="badge good">&#10003; existing</span>
+            {% elif st == "extends_existing" %}
+                <span class="badge">&#8627; extends existing</span>
+            {% elif st == "new" %}
+                <span class="badge warn">+ new</span>
+            {% endif %}
+        </div>
+        <div class="queue-row-meta">
+            {{ p.sender_email }}
+            {% if p.list_id %}&middot; <code>{{ p.list_id }}</code>{% endif %}
+            &middot; <span class="badge">{{ p.recent_count }} recent</span>
+        </div>
+        {% if p.subject_sample %}
+        <div class="queue-row-subject"><strong>Subject:</strong> {{ p.subject_sample }}</div>
+        {% endif %}
+        {% if p.body_preview %}
+        <div class="queue-row-preview">{{ p.body_preview }}</div>
+        {% endif %}
+        {% set current_labels = current_labels_by_id.get(p.id) %}
+        {% if current_labels %}
+        <div class="queue-row-current">
+            &#128278; Currently auto-labeled as:
+            {% for n in current_labels %}<code>{{ n }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+            <span class="meta">— Apply will overwrite</span>
+        </div>
+        {% endif %}
+
+        {# Surface non-default suggested actions so the user isn't surprised
+           when Apply fires them — they'd otherwise be hidden inside the
+           collapsed Edit panel and silently submitted with the form. #}
+        {% set sa = suggested_by_id.get(p.id) %}
+        {% if sa %}
+        {% set extras = [] %}
+        {% if sa.inbox == 'skip' %}{% set _ = extras.append('Skip inbox') %}{% endif %}
+        {% if sa.inbox == 'trash' %}{% set _ = extras.append('Move to trash') %}{% endif %}
+        {% if sa.mark_read %}{% set _ = extras.append('Mark as read') %}{% endif %}
+        {% if sa.categorize != 'none' %}{% set _ = extras.append('Categorize as ' + sa.categorize|capitalize) %}{% endif %}
+        {% if sa.importance == 'important' %}{% set _ = extras.append('Mark important') %}{% endif %}
+        {% if sa.importance == 'never_important' %}{% set _ = extras.append('Never important') %}{% endif %}
+        {% if sa.star %}{% set _ = extras.append('Star') %}{% endif %}
+        {% if sa.never_spam %}{% set _ = extras.append('Never to spam') %}{% endif %}
+        {% if extras %}
+        <div class="queue-row-extras">
+            &#9881; Apply will also: {{ extras | join(' &middot; ') | safe }}
+            <span class="meta">— change in Edit if not what you want</span>
+        </div>
+        {% endif %}
+        {% endif %}
+    </div>
+
+    {# ---------- main apply form (Apply / Skip / Never) ---------- #}
+    <form method="POST" action="/queue/decide" class="queue-row-form">
+        <input type="hidden" name="nonce" value="{{ nonce }}">
+        <input type="hidden" name="proposal_id" value="{{ p.id }}">
+
+        {# Inputs are hidden when 'Edit' is collapsed; revealed by JS toggle.
+           Form submits whatever value is in them, edited or not. #}
+        <div id="edit_{{ p.id }}" class="queue-row-edit" style="display: none;">
+            {# No `required` here — the inputs live inside a display:none
+               container, and Chrome refuses to focus a hidden invalid
+               control, breaking Skip/Never silently if the value is empty.
+               Server-side validation already enforces non-empty for Apply. #}
+            <label>Label name</label>
+            <input type="text" name="label_name" value="{{ p.proposed_label }}">
+
+            <label>Filter query (Gmail search syntax)</label>
+            <input type="text" name="filter_query" value="{{ p.proposed_query }}">
+
+            {% include "_scope.html" %}
+            {% set suggested_actions = suggested_by_id.get(p.id) %}
+            {% include "_actions.html" %}
+        </div>
+
+        {# Hidden inputs hold the proposed values when Edit is collapsed. #}
+        {% if False %}{# duplicate-name guard: see comment above #}{% endif %}
+
+        <div class="queue-row-actions">
+            <button type="submit" name="action" value="apply">Apply</button>
+            <button type="submit" name="action" value="skip" class="secondary">Skip</button>
+            <button type="submit" name="action" value="never" class="secondary">Never</button>
+        </div>
+    </form>
+
+    {# ---------- secondary tools row (regenerate / edit / full view) ---------- #}
+    <div class="queue-row-tools">
+        <form method="POST" action="/queue/regenerate" style="display: inline;">
+            <input type="hidden" name="nonce" value="{{ nonce }}">
+            <input type="hidden" name="proposal_id" value="{{ p.id }}">
+            <button type="submit" class="link-btn" title="Re-run the LLM proposer for this row">
+                &#10024; Regenerate with AI
+            </button>
+        </form>
+        <button type="button" class="link-btn"
+                onclick="toggleEdit('{{ p.id }}')">
+            &#9998; Edit
+        </button>
+        <a href="/proposal/{{ p.id }}/full" target="_blank" class="link-btn">
+            &#10138; Full view
+        </a>
+    </div>
+</div>
+{% endfor %}
+
+<p class="meta" style="margin-top: 24px;">
+    <a href="/">&larr; Back to landing</a>
+</p>
+
+<script>
+function toggleEdit(pid) {
+    var el = document.getElementById('edit_' + pid);
+    if (!el) return;
+    el.style.display = (el.style.display === 'none' || !el.style.display) ? 'block' : 'none';
+}
+</script>
+{% endblock %}

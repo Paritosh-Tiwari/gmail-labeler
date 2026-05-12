@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>QuickLabel</h1>
+<p class="meta">Local Gmail labeling assistant. Listening on <code>{{ host }}:{{ port }}</code>.</p>
+
+<div class="card">
+    <h2>Install the bookmarklet</h2>
+    <p>Make sure your bookmark bar is visible (Ctrl+Shift+B in Chrome / Edge), then <strong>drag this link onto it</strong>:</p>
+    <p style="margin: 16px 0;">
+        <a href="{{ bookmarklet }}" class="btn"
+           onclick="event.preventDefault(); alert('Drag this link to your bookmark bar instead of clicking it.');"
+           draggable="true">Label this</a>
+    </p>
+    <p class="meta" style="font-size: 12px;">
+        Pasting the URL directly into Chrome's address bar won't work &mdash; Chrome strips the
+        <code>javascript:</code> prefix as a security measure. Drag-to-bookmark-bar is the only reliable install.
+    </p>
+</div>
+
+<div class="card">
+    <h2>How to use</h2>
+    <ol>
+        <li>In Gmail, open any specific email (URL changes to <code>...#inbox/FMfcgz...</code>).</li>
+        <li>Click the <strong>Label this</strong> bookmark.</li>
+        <li>A new tab opens here with a proposal.</li>
+        <li>Tweak the suggested label / filter, click <strong>Apply</strong>.</li>
+    </ol>
+</div>
+
+<div class="card">
+    <h2>Inbox queue</h2>
+    <p class="meta">
+        Scan recent inbox mail and review proposed labels in one place &mdash; no need to open each email.
+    </p>
+    <p style="margin: 12px 0;">
+        <a href="/queue" class="btn">Open queue</a>
+        &nbsp;
+        <a href="/history" class="btn secondary" style="background: white; color: var(--fg); border: 1px solid var(--border);">History &amp; undo</a>
+    </p>
+</div>
+
+<div class="card">
+    <h2>Status</h2>
+    <p class="meta">Server is healthy: <code><a href="/healthz">{{ host }}:{{ port }}/healthz</a></code></p>
+    <p class="meta">
+        <a href="/audit">Audit log &rarr;</a> &mdash; HTTP requests received. Spot non-localhost <code>Host</code> headers (DNS-rebinding attempts).
+    </p>
+    <p class="meta">
+        <a href="/settings">Settings &rarr;</a> &mdash; LLM model, port, log verbosity.
+    </p>
+</div>
+{% endblock %}

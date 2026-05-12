@@ -1,0 +1,15 @@
+{# Apply-scope radio. Controls both the filter-creation and back-prop passes. #}
+<div class="card">
+    <h2>Apply to</h2>
+    <p class="meta" style="margin-top:-4px;">
+        Whether to create a filter (affects future mail) and/or apply to existing matches.
+    </p>
+    <div class="action-row" style="margin-top: 8px;">
+        <label class="opt"><input type="radio" name="apply_scope" value="future_only">
+            Future mail only <span class="meta">(create filter, no back-prop)</span></label>
+        <label class="opt"><input type="radio" name="apply_scope" value="existing_only">
+            Existing only <span class="meta">(back-prop, no filter)</span></label>
+        <label class="opt"><input type="radio" name="apply_scope" value="both" checked>
+            Future + existing <span class="meta">(filter + back-prop)</span></label>
+    </div>
+</div>
