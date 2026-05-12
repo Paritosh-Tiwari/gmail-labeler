@@ -36,8 +36,12 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Claude Code session state (lock files, local settings)
-.claude/
+# Claude Code session state (lock files, local settings) -- ignored
+# everywhere EXCEPT the .claude/agents/ directory + CLAUDE.md, which are
+# the actual artifacts shipped on this branch.
+.claude/*
+!.claude/agents/
+.claude/agents/*.local.*
 
 # Local-only git archive of pre-publish history
 .git-archive/
