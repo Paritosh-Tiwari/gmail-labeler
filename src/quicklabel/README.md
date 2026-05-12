@@ -76,7 +76,7 @@ PYTHONPATH=src .venv/Scripts/python.exe -m quicklabel serve
 ## Daily use
 
 1. Open any email in Gmail.
-2. Click the **Label this** bookmarklet.
+2. Click the **Label this Email** bookmarklet.
 3. New tab opens with a proposal — review, tweak, click **Apply**.
 4. Done.
 
