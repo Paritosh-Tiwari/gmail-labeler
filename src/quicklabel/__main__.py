@@ -8,7 +8,19 @@ Commands:
 """
 from __future__ import annotations
 
+import os
 import sys
+
+# When launched via pythonw.exe (no console — used by Task Scheduler /
+# launchd for hidden auto-start), sys.stdout and sys.stderr are None.
+# Any library that writes to them (uvicorn does on startup) crashes the
+# process with exit code 1 before file logging can attach. Replace them
+# with /dev/null sinks so writes succeed silently. File-based logs are
+# still captured via _logging.setup_logging in server.main().
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
 
 from .auth import build_service, get_credentials
 from .bookmarklet import bookmarklet_url

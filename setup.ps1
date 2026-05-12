@@ -218,10 +218,18 @@ Write-Ok "Ollama is installed. (Its background service auto-starts on Windows.)"
 Write-Step "6/8" "Local LLM model"
 $model = Select-Model
 if ($model) {
-    Write-Info "Pulling $model via Ollama (this may take a while)..."
-    & ollama pull $model
+    # Skip pull if already installed -- `ollama pull` re-fetches the
+    # manifest even when no bytes change, which looks like a re-download
+    # to users.
+    $installed = (& ollama list 2>$null) -join "`n"
+    if ($installed -match [regex]::Escape($model)) {
+        Write-Ok "$model is already installed -- skipping pull."
+    } else {
+        Write-Info "Pulling $model via Ollama (this may take a while)..."
+        & ollama pull $model
+        Write-Ok "Model pulled."
+    }
     Save-ModelChoice -ProjectRoot $ProjectRoot -Model $model
-    Write-Ok "Model ready."
 } else {
     Write-Info "Skipped. Set llm_model later at http://127.0.0.1:8765/settings"
 }
