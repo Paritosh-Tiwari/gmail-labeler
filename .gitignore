@@ -41,3 +41,6 @@ Thumbs.db
 
 # Local-only git archive of pre-publish history
 .git-archive/
+
+# Personal drafts — LinkedIn posts, notes, anything not meant to be public
+private/
