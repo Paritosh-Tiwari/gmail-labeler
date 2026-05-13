@@ -586,21 +586,23 @@ def _default_chat_fn() -> ChatFn:
 
     Honors QUICKLABEL_LLM_MODEL env var on every call so the user can
     swap models mid-process (e.g. via `os.environ` in a debug session)
-    without restarting. Comment used to claim this and lie — the model
-    name was being captured once at first call.
+    without restarting.
     """
     from lib.ollama_client import chat, get_client
     client = get_client()
 
-    def _call(prompt: str, system: str = _SYSTEM_PROMPT) -> str:
+    def _call(prompt: str, system: str = _SYSTEM_PROMPT,
+              num_predict: int = 1500) -> str:
         return chat(
             client, prompt=prompt, model=get_model_name(), system=system,
             # temp=0 for max determinism — labels and filters are decisions,
-            # not creative writing. Two regens on the same email should
-            # match.
-            temperature=0.0, num_predict=800,
+            # not creative writing. (Reasoning models like gpt-oss are still
+            # non-deterministic here despite temp=0 because their hidden
+            # thinking branch varies; we paper over that with retry logic
+            # in intelligent_propose.)
+            temperature=0.0, num_predict=num_predict,
             # Default Ollama context (2048) is too small for system prompt
-            # + 3KB body + 138-label list + JSON schema. 16K leaves plenty.
+            # + body + label list + JSON schema. 16K leaves plenty.
             num_ctx=16384,
         )
 
@@ -674,18 +676,42 @@ def intelligent_propose(
         p.model = model + " (failed → heuristic)"
         return p
 
+    # Retry once with a larger prediction budget if the first call returned
+    # empty or unparseable JSON. Reasoning models like gpt-oss:20b consume
+    # tokens on hidden 'thinking' before visible output and sometimes burn
+    # the whole num_predict budget — leaving an empty visible response.
+    # Truncated-mid-JSON responses get a second chance for the same reason.
+    retried = False
     try:
         p = parse_llm_response(raw)
-    except ValueError as e:
-        p = _heuristic_fallback(email, sender_stats, cache_key, f"invalid LLM JSON: {e}")
-        p.prompt = prompt
-        p.model = model + " (invalid JSON → heuristic)"
-        p.raw_response = raw
-        return p
+    except ValueError as first_err:
+        try:
+            raw_retry = chat(prompt, system=_SYSTEM_PROMPT, num_predict=3500)
+            retried = True
+        except Exception:
+            raw_retry = ""
+        try:
+            p = parse_llm_response(raw_retry) if raw_retry else None
+        except ValueError:
+            p = None
+        if p is None:
+            fb = _heuristic_fallback(
+                email, sender_stats, cache_key,
+                f"invalid LLM JSON: {first_err}",
+            )
+            fb.prompt = prompt
+            fb.model = model + (
+                " (invalid JSON twice → heuristic)" if retried
+                else " (invalid JSON → heuristic)"
+            )
+            fb.raw_response = raw_retry or raw
+            return fb
+        # Retry succeeded — use its response for caching too
+        raw = raw_retry
 
     p.cache_key = cache_key
     p.prompt = prompt
-    p.model = model
+    p.model = model + (" (retry)" if retried else "")
     if storage is not None:
         # Cache the raw response so a future parse uses the same input shape
         storage.set_intel(cache_key, raw)

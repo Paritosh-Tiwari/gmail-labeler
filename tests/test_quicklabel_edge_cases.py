@@ -535,8 +535,13 @@ def test_intelligent_propose_caches_consistent_after_invalid_json_fallback(tmp_p
         email=email, body="x", signals=sigs, sender_stats=stats,
         existing_labels=[], storage=store, chat_fn=garbage_chat,
     )
-    # Should retry on second call (i.e., NOT just return cached garbage)
-    assert calls["n"] == 2, "cache shouldn't store invalid JSON"
+    # Each intelligent_propose call now also retries once on parse
+    # failure (defense against reasoning models with non-deterministic
+    # empty / truncated output). So 2 propose calls = 4 chat calls.
+    # The key invariant the test guards: garbage is NEVER cached, so
+    # the second propose call goes back to the chat_fn instead of
+    # returning a cached bad parse.
+    assert calls["n"] == 4, "cache shouldn't store invalid JSON"
     assert p1.confidence < 0.5
     assert p2.confidence < 0.5
 
