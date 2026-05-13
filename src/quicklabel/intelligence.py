@@ -394,7 +394,7 @@ def build_prompt(
 RECENT LABELS THIS USER APPLIED (style reference — match their naming conventions):
 {recent_block}
 
-EXISTING GMAIL FILTERS (don't propose a duplicate of any of these):
+EXISTING GMAIL FILTERS (if one of these already fits this email, propose the SAME filter — we'll attach your new label to it instead of creating a duplicate):
 {filters_block}
 
 NEW EMAIL TO LABEL:
@@ -421,9 +421,10 @@ TASK:
    when no existing parent fits. Match the user's naming style as seen
    in the RECENT LABELS section (case, separator depth, abbreviations).
 2. Design a Gmail filter that catches FUTURE similar mail. Re-read the
-   FILTER DESIGN RULES in the system message. If a near-equivalent
-   filter already exists (see EXISTING GMAIL FILTERS), drop confidence
-   and mention the overlap in your rationale.
+   FILTER DESIGN RULES in the system message. If one of the EXISTING
+   GMAIL FILTERS already fits this email, propose that same filter
+   verbatim — we'll attach your new label to it rather than creating a
+   duplicate. Only propose a new filter shape if no existing one fits.
 3. Suggest auto-actions only when clearly appropriate. Examples:
    - heavy promotional mail: inbox=skip, mark_read=true, categorize=promotions
    - social-network notifications: categorize=social
@@ -458,7 +459,7 @@ OUTPUT — return EXACTLY one JSON object, no prose before or after:
     "star": <true|false>,
     "never_spam": <true|false>
   }},
-  "confidence": <number 0.0-1.0; lower if you had to guess on either label or filter, or if your filter overlaps with an existing one>
+  "confidence": <number 0.0-1.0; lower if you had to guess on either label or filter>
 }}
 """
 

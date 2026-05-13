@@ -23,10 +23,21 @@
             {% else %}
                 <span class="badge warn">+ new label</span>
             {% endif %}
+            {% if filter_status_value == "matches_existing" %}
+                <span class="badge good" title="The proposed filter matches one of your existing Gmail filters">&#10003; existing filter</span>
+            {% else %}
+                <span class="badge warn">+ new filter</span>
+            {% endif %}
             {% if intel and intel.confidence < 0.6 %}
                 <span class="badge uncertain">uncertain &mdash; please verify</span>
             {% endif %}
         </div>
+
+        {% if filter_status_value == "matches_existing" and existing_filter_match %}
+        <div class="hero-summary" style="margin-top: 6px; color: var(--accent);">
+            &#8627; This filter already exists. Applying will extend it so your new label gets attached.
+        </div>
+        {% endif %}
 
         <div class="hero-summary">
             From <strong>{{ email.sender_email }}</strong>
