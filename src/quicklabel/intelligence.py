@@ -39,7 +39,12 @@ from .storage import Storage
 
 
 MAX_LABELS_IN_PROMPT = 500
-MAX_BODY_CHARS_IN_PROMPT = 2500
+# Body excerpt strategy: head + tail rather than head-only. Newsletters and
+# transactional emails often put distinguishing content (sender brand,
+# unsubscribe context, footer signatures) at the bottom — a head-only
+# excerpt misses those signals.
+BODY_HEAD_CHARS = 1500
+BODY_TAIL_CHARS = 800
 
 from .settings import DEFAULT_LLM_MODEL, load_settings
 
@@ -81,46 +86,178 @@ def _cache_key(email: EmailFingerprint, body: str) -> str:
 
 # --------------------------- prompt ---------------------------
 
-_SYSTEM_PROMPT = (
-    "You are an email organization assistant for Gmail. Your job has two parts:\n"
-    "  1. Choose where this email belongs in the user's existing label tree, "
-    "or propose a new sub-label under an existing parent. Strongly prefer "
-    "reusing existing labels over creating new ones.\n"
-    "  2. Design a Gmail filter rule that will catch similar FUTURE mail "
-    "from the same source/category — not just this exact email.\n"
-    "\n"
-    "FILTER DESIGN RULES (critical — most common failure mode):\n"
-    "- The 'subject' field in a Gmail filter does substring matching. So a\n"
-    "  subject filter must be a STABLE substring that recurs across this\n"
-    "  sender's emails — never the full one-off subject line.\n"
-    "- DO NOT include variable parts in subject filters: dollar amounts, "
-    "dates, transaction IDs, order numbers, names of recipients, "
-    "issue/edition numbers (e.g. '#234'), times, account-last-4-digits.\n"
-    "- Choosing filter type:\n"
-    "    1. If a list-id is present, USE it. Most precise.\n"
-    "    2. Else, if Sender history shows a stable subject prefix shared\n"
-    "       across many emails (the prompt will tell you), USE\n"
-    "       'from_subject' with that prefix as the subject. Don't drop\n"
-    "       a clear pattern — it makes the filter narrower and safer.\n"
-    "    3. Only fall back to sender-alone ('from') if there's no list-id\n"
-    "       AND no shared subject prefix in the sender history.\n"
-    "- Examples:\n"
-    "    Subject 'Your Citi card was charged $123.45 at STARBUCKS on Mar 5'\n"
-    "    Sender history: 530 prior, 420 share prefix 'Your Citi card was charged'\n"
-    "      RIGHT: type='from_subject', from='alerts@citi.com',\n"
-    "             subject='Your Citi card was charged'\n"
-    "      WRONG: type='from'  (drops the strong, recurring pattern)\n"
-    "      WRONG: subject='Your Citi card was charged $123.45 ...'  (variable parts)\n"
-    "    Subject 'Order #A8472 shipped — tracking 1Z999...'\n"
-    "    Sender history: 50 prior, no shared subject prefix\n"
-    "      RIGHT: type='from', from='ship-confirm@amazon.com'\n"
-    "    Subject 'Weekly insights #234 — The AI infra wave'\n"
-    "    List-ID: weekly.sequoiacap.com\n"
-    "      RIGHT: type='list_id', list_id='weekly.sequoiacap.com'\n"
-    "\n"
-    "Always respond with a single JSON object and nothing else — no prose "
-    "before, no prose after, no markdown fences."
-)
+_SYSTEM_PROMPT = """You are an email organization assistant for Gmail. Your job has two parts:
+  1. Choose where this email belongs in the user's existing label tree, or
+     propose a new sub-label under an existing parent. Strongly prefer
+     reusing existing labels over creating new ones.
+  2. Design a Gmail filter rule that will catch similar FUTURE mail from
+     the same source/category — not just this exact email.
+
+KEY DECISION — does this sender use a STABLE subject pattern, or one-offs?
+Before picking the filter type, judge whether THIS SENDER tends to send
+mail with a recurring subject template or unique one-off subjects:
+
+  Recurring-template indicators (favor 'from_subject'):
+    - Subject reads like a template — contains words like 'Your', 'Order',
+      'Receipt', 'Statement', 'Alert', 'Notification', 'Charged',
+      'Shipped', 'Invoice', 'Confirmation'.
+    - Sender history shows a strong shared subject prefix (count is given
+      in the user prompt below).
+    - Subject has a clear template + variable portion (numbers, dates,
+      amounts, IDs, recipient names).
+    Example: 'Your Citi card was charged $48.20 at WHOLE FOODS' — the
+    prefix 'Your Citi card was charged' is the stable template.
+
+  One-off subject indicators (favor 'from_keyword' or 'from'):
+    - Subject reads like editorial / announcement content — 'The Future of
+      X', 'Announcing Y', 'New course: Z starts April 1', 'Why we built'.
+    - Each prior email from this sender has a distinct subject (low or
+      zero shared-prefix count in the sender history).
+    - The only stable signal is the sender + a distinctive keyword that
+      appears in the body of similar emails.
+    Example: 'New Maven course: AI for PMs starts April 1' — subject is
+    one-off, but 'course' or 'Maven course' is in every announcement body.
+
+FILTER TYPES (in preference order — pick the most specific that applies):
+  1. list_id       Sender has a List-ID header. MOST precise. Always use
+                   when available.
+  2. from_subject  Sender + STABLE subject substring. Use for recurring
+                   templates. Subject must NOT contain variable parts.
+  3. from_keyword  Sender + a distinctive keyword/phrase that appears in
+                   the BODY of similar emails (Gmail matches it anywhere
+                   in the message). Use when subject is one-off but a
+                   body keyword reliably distinguishes this category.
+                   Multi-word phrases are fine and more precise. Avoid
+                   generic words ('email', 'click', 'the', 'we').
+  4. from          Sender alone. Use ONLY when neither subject nor body
+                   has a stable distinguishing pattern AND the sender
+                   exclusively sends mail of this single category.
+
+FILTER DESIGN RULES:
+- For from_subject: subject is substring-matched. NEVER include variable
+  parts (amounts, dates, transaction IDs, order numbers, recipient names,
+  edition numbers like '#234', times, account-last-4-digits).
+- For from_keyword: pick a SPECIFIC distinctive keyword. 'invoice',
+  'course', 'shipment', a product name, a platform name. Not
+  conversational filler.
+- Examples:
+
+  (A) Recurring transactional — use from_subject:
+      Subject 'Your Citi card was charged $123.45 at STARBUCKS on Mar 5'
+      Sender history: 530 prior, 420 share prefix 'Your Citi card was charged'
+        RIGHT:  type='from_subject', from='alerts@citi.com',
+                subject='Your Citi card was charged'
+        WRONG:  type='from'  (drops a strong recurring pattern)
+        WRONG:  subject='Your Citi card was charged $123.45 ...' (variable parts)
+
+  (B) One-off subject, distinctive body keyword — use from_keyword:
+      Subject 'New Maven course: AI for PMs starts April 1'
+      Sender history: 12 prior, no shared subject prefix
+        RIGHT:  type='from_keyword', from='hello@maven.com',
+                keyword='Maven course'
+        WRONG:  type='from_subject', subject='New Maven course'
+                (subject is one-off; future announcements may say
+                'Just launched' or 'Now enrolling' instead)
+        WRONG:  type='from'  (drops 'Maven course' which excludes the
+                sender's other email types like billing or password resets)
+
+  (C) Variable subject AND no recurring body keyword — use from:
+      Subject 'Order #A8472 shipped — tracking 1Z999...'
+      Sender history: 50 prior, no shared subject prefix
+        RIGHT:  type='from', from='ship-confirm@amazon.com'
+
+  (D) List-ID present — use list_id:
+      Subject 'Weekly insights #234 — The AI infra wave'
+      List-ID: weekly.sequoiacap.com
+        RIGHT:  type='list_id', list_id='weekly.sequoiacap.com'
+
+Always respond with a single JSON object and nothing else — no prose
+before, no prose after, no markdown fences. Use English for all label
+names and rationales.
+
+WORKED EXAMPLES (input fragment → expected output):
+
+EXAMPLE 1 — recurring transactional (from_subject):
+Input:
+  USER'S EXISTING LABELS:
+  - Finance/Statements
+  - Newsletters/Tech
+  NEW EMAIL TO LABEL:
+  From: Citi Alerts <alerts@citi.com>
+  Subject: Your Citi card was charged $48.20 at WHOLE FOODS on May 12
+  List-ID: (none)
+  Sender history: 530 prior emails from this sender; 420 share the subject
+  prefix 'Your Citi card was charged'
+
+Output:
+{
+  "chosen_label": "Finance/Statements/Citi",
+  "is_new_label": true,
+  "rationale": "Recurring transactional alert from Citi; nests under Finance/Statements as a new sub-label. Subject prefix recurs in 420/530 prior emails so from_subject is safest.",
+  "filter": {
+    "type": "from_subject",
+    "from": "alerts@citi.com",
+    "subject": "Your Citi card was charged",
+    "keyword": null,
+    "list_id": null
+  },
+  "actions": {
+    "inbox": "keep",
+    "importance": "default",
+    "categorize": "updates",
+    "mark_read": true,
+    "star": false,
+    "never_spam": false
+  },
+  "confidence": 0.92
+}
+
+EXAMPLE 2 — one-off subject, distinctive body keyword (from_keyword):
+Input:
+  USER'S EXISTING LABELS:
+  - Learning
+  - Newsletters/Tech
+  NEW EMAIL TO LABEL:
+  From: Maven <hello@maven.com>
+  Subject: AI for Product Managers — cohort starts April 1
+  List-ID: (none)
+  Sender history: 12 prior emails from this sender; no shared subject prefix
+
+Output:
+{
+  "chosen_label": "Learning/Maven",
+  "is_new_label": true,
+  "rationale": "One-off course-announcement subject; sender mixes billing and course mail, so filter on sender + 'Maven course' keyword to capture only course announcements without catching unrelated mail.",
+  "filter": {
+    "type": "from_keyword",
+    "from": "hello@maven.com",
+    "subject": null,
+    "keyword": "Maven course",
+    "list_id": null
+  },
+  "actions": {
+    "inbox": "keep",
+    "importance": "default",
+    "categorize": "none",
+    "mark_read": false,
+    "star": false,
+    "never_spam": false
+  },
+  "confidence": 0.78
+}
+"""
+
+
+def _body_excerpt(body: str) -> str:
+    """Return body's head + tail. Whole body if it fits in head+tail."""
+    body = body or ""
+    if len(body) <= BODY_HEAD_CHARS + BODY_TAIL_CHARS:
+        return body
+    return (
+        body[:BODY_HEAD_CHARS]
+        + "\n\n... [middle truncated] ...\n\n"
+        + body[-BODY_TAIL_CHARS:]
+    )
 
 
 def build_prompt(
@@ -133,9 +270,7 @@ def build_prompt(
     labels = existing_labels[:MAX_LABELS_IN_PROMPT]
     labels_block = "\n".join(f"- {lbl}" for lbl in labels) if labels else "(none yet)"
 
-    body_excerpt = (body or "")[:MAX_BODY_CHARS_IN_PROMPT]
-    if len(body or "") > MAX_BODY_CHARS_IN_PROMPT:
-        body_excerpt += "..."
+    body_excerpt = _body_excerpt(body)
 
     signal_lines = "\n".join(f"- {s}" for s in signals.describe()) or "- (no notable signals)"
 
@@ -187,12 +322,13 @@ OUTPUT — return EXACTLY one JSON object, no prose before or after, no markdown
 {{
   "chosen_label": "<full path>",
   "is_new_label": <true|false>,
-  "rationale": "<1-2 sentences. Mention WHY this label fits and WHY this filter shape (esp. subject choice).>",
+  "rationale": "<1-2 sentences. Mention WHY this label fits and WHY this filter shape (esp. subject vs keyword choice).>",
   "filter": {{
-    "type": "<list_id | from | from_subject>",
-    "from": "<sender email or null>",
-    "subject": "<STABLE recurring substring, or null. NEVER include $ amounts, dates, IDs, recipient names, edition numbers.>",
-    "list_id": "<list id, or null>"
+    "type": "<list_id | from_subject | from_keyword | from>",
+    "from": "<sender email, or null if type='list_id'>",
+    "subject": "<STABLE recurring substring (only when type='from_subject'). NEVER include amounts, dates, IDs, recipient names, edition numbers. Otherwise null.>",
+    "keyword": "<distinctive word or short phrase from the body (only when type='from_keyword'). Avoid generic words. Otherwise null.>",
+    "list_id": "<list id (only when type='list_id'). Otherwise null.>"
   }},
   "actions": {{
     "inbox": "<keep | skip | trash>",
@@ -213,10 +349,21 @@ _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 def _filter_query_from(spec: dict) -> tuple[str, dict]:
-    """Convert the LLM's filter spec to (gmail_query, filter_criteria_dict)."""
+    """Convert the LLM's filter spec to (gmail_query, filter_criteria_dict).
+
+    Filter types:
+      list_id      Gmail filter `query`: list:<id>
+      from_subject Gmail filter `from` + `subject` (substring match in subject)
+      from_keyword Gmail filter `from` + `query` (matches keyword anywhere
+                   in the message: subject + body + headers — broader than
+                   from_subject; right call when subjects are one-off but
+                   a body keyword reliably tags this category)
+      from         Gmail filter `from` only
+    """
     ftype = (spec.get("type") or "").lower()
     sender = (spec.get("from") or "").strip()
     subject = (spec.get("subject") or "").strip()
+    keyword = (spec.get("keyword") or "").strip()
     list_id = (spec.get("list_id") or "").strip()
 
     if ftype == "list_id" or list_id:
@@ -225,10 +372,15 @@ def _filter_query_from(spec: dict) -> tuple[str, dict]:
     if ftype == "from_subject" and sender and subject:
         q = f'from:{sender} subject:"{subject}"'
         return q, {"from": sender, "subject": subject}
-    if ftype == "from_keyword" and sender and subject:
-        # Same shape as from_subject for our purposes
-        q = f'from:{sender} subject:"{subject}"'
-        return q, {"from": sender, "subject": subject}
+    if ftype == "from_keyword" and sender and keyword:
+        # Quote multi-word keywords so Gmail treats them as a phrase rather
+        # than ANDing the words separately.
+        if " " in keyword:
+            q_kw = f'"{keyword}"'
+        else:
+            q_kw = keyword
+        q = f"from:{sender} {q_kw}"
+        return q, {"from": sender, "query": q_kw}
     if sender:
         q = f"from:{sender}"
         return q, {"from": sender}
