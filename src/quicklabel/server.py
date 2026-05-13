@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from lib.config import CREDENTIALS_PATH
-from lib.gmail_client import list_filters, list_labels, search_count
+from lib.gmail_client import list_filters, list_labels, search_count, search_message_ids
 
 from .actions import ActionChoices, describe, to_label_mutations
 from .auth import (
@@ -285,6 +285,42 @@ def label_page(request: Request, id: str = Query(..., min_length=4)):
     )
 
 
+def _sample_matching_messages(svc, query: str, limit: int = 5) -> list[dict]:
+    """Return up to `limit` messages matching `query` with sender/subject/
+    date/snippet, so the user can preview what a filter will actually catch
+    before applying it. Best-effort: returns [] on any API hiccup rather
+    than failing the page render.
+    """
+    if not query or not query.strip():
+        return []
+    try:
+        ids = search_message_ids(svc, query.strip(), max_results=limit)
+    except Exception:
+        return []
+
+    samples: list[dict] = []
+    for mid in ids:
+        try:
+            msg = svc.users().messages().get(
+                userId="me", id=mid, format="metadata",
+                metadataHeaders=["From", "Subject", "Date"],
+            ).execute()
+        except Exception:
+            continue
+        headers = {
+            h.get("name", ""): h.get("value", "")
+            for h in (msg.get("payload") or {}).get("headers", [])
+        }
+        samples.append({
+            "id": mid,
+            "from": headers.get("From", ""),
+            "subject": headers.get("Subject", "(no subject)"),
+            "date": headers.get("Date", ""),
+            "snippet": (msg.get("snippet") or "")[:200],
+        })
+    return samples
+
+
 def _build_description_proposal_context(
     *,
     request: Request,
@@ -342,6 +378,8 @@ def _build_description_proposal_context(
         except Exception:
             est_count = 0
 
+    sample_messages = _sample_matching_messages(svc, ip.filter_query, limit=5)
+
     fproposal = FilterProposal(
         criteria=ip.filter_criteria,
         query=ip.filter_query,
@@ -370,6 +408,8 @@ def _build_description_proposal_context(
         "label_status_value": status,
         "filter_status_value": filter_status_value,
         "existing_filter_match": existing_filter_match,
+        "sample_messages": sample_messages,
+        "est_count": est_count,
     }
 
 
