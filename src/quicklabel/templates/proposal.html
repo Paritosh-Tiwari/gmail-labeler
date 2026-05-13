@@ -146,6 +146,43 @@
 
             <h2>Filter</h2>
             <div class="card">
+                {# ----- Sender scope toggle ----- #}
+                {% set fq_lower = (proposal.filter.query or '') | lower %}
+                {% set from_full_token = 'from:' ~ (email.sender_email | lower) %}
+                {% set from_domain_token = 'from:' ~ (sender_domain | lower) %}
+                {% set scope_is_full = from_full_token in fq_lower %}
+                {% set scope_is_domain = (not scope_is_full) and (from_domain_token in fq_lower) %}
+                {% set scope_is_any = 'from:' not in fq_lower %}
+
+                <p class="meta" style="margin-bottom: 6px;">
+                    Sender scope — the AI's recommendation is selected; override if you want a broader or narrower match:
+                </p>
+                <div style="display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 10px;">
+                    <label class="opt" style="display: flex; align-items: center; gap: 6px;">
+                        <input type="radio" name="sender_scope" value="full"
+                               data-sender-full="{{ email.sender_email }}"
+                               data-sender-domain="{{ sender_domain }}"
+                               {% if scope_is_full %}checked{% endif %}
+                               onchange="setSenderScope(this)">
+                        <span>This sender only <code style="font-size: 11px;">{{ email.sender_email }}</code></span>
+                    </label>
+                    {% if sender_domain %}
+                    <label class="opt" style="display: flex; align-items: center; gap: 6px;">
+                        <input type="radio" name="sender_scope" value="domain"
+                               {% if scope_is_domain %}checked{% endif %}
+                               onchange="setSenderScope(this)">
+                        <span>This domain <code style="font-size: 11px;">{{ sender_domain }}</code></span>
+                    </label>
+                    {% endif %}
+                    <label class="opt" style="display: flex; align-items: center; gap: 6px;">
+                        <input type="radio" name="sender_scope" value="any"
+                               {% if scope_is_any %}checked{% endif %}
+                               onchange="setSenderScope(this)">
+                        <span>Any sender <span class="meta" style="font-size: 11px;">(drops <code>from:</code>; relies on subject/keyword)</span></span>
+                    </label>
+                </div>
+                <p id="sender-warn" style="display: none; color: #c5221f; font-size: 12px; margin: 0 0 8px;"></p>
+
                 <label>Gmail search query (will become a filter)</label>
                 <input type="text" name="filter_query" id="filter_query" value="{{ proposal.filter.query }}" required>
                 <div class="rationale">{{ proposal.filter.rationale }}</div>
@@ -180,6 +217,41 @@
 </form>
 
 <script>
+function setSenderScope(radio) {
+    // Read sender + domain from the data-attrs on the "full" radio
+    // (they're only set there to avoid duplicating the data).
+    var fullRadio = document.querySelector('input[name="sender_scope"][data-sender-full]');
+    var fullEmail = (fullRadio && fullRadio.dataset.senderFull) || '';
+    var domain = (fullRadio && fullRadio.dataset.senderDomain) || '';
+    var mode = radio.value;
+
+    var qInput = document.getElementById('filter_query');
+    if (!qInput) return;
+    var q = qInput.value;
+
+    // Strip any existing from:<token> (case-insensitive). The rest of
+    // the query — subject:"...", keyword phrases, list:... — is preserved.
+    var stripped = q.replace(/from:\S+/gi, '').replace(/\s+/g, ' ').trim();
+
+    var newFrom = mode === 'full' ? fullEmail :
+                  mode === 'domain' ? domain : null;
+
+    var newQuery = newFrom
+        ? ('from:' + newFrom + (stripped ? ' ' + stripped : ''))
+        : stripped;
+    qInput.value = newQuery;
+
+    var warnEl = document.getElementById('sender-warn');
+    if (warnEl) {
+        if (!newFrom && !stripped) {
+            warnEl.textContent = '⚠ Dropping the sender leaves an empty filter. Add a subject or keyword phrase first, or pick a different scope.';
+            warnEl.style.display = 'block';
+        } else {
+            warnEl.style.display = 'none';
+        }
+    }
+}
+
 function applyQuestionChoice(radio) {
     try {
         var v = JSON.parse(radio.value);

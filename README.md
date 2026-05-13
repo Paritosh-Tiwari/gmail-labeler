@@ -26,6 +26,41 @@ cheap). For any row where the suggestion isn't quite right, click
 Nothing leaves your computer except the unavoidable Gmail API calls.
 The LLM runs locally via Ollama. OAuth tokens live in your OS keyring.
 
+## Smart filter design — labels broaden across senders when they should
+
+A naive labeler would always design a filter as `from:<this sender>`. That's
+the right call for a single-creator newsletter, but the wrong call for
+**category emails** that arrive from many senders — OTP / verification codes
+(Okta, Google, Slack, Apple…), shipping notifications (every retailer),
+password resets, receipts. Pinning the filter to one sender means you'll
+re-create the same label over and over.
+
+QuickLabel asks one question first: *"If I applied this label, which other
+emails in this inbox should also receive it?"* That answer drives the
+filter shape:
+
+| Pattern | Filter shape | Example |
+|---|---|---|
+| One sender, all their mail belongs in this label | `from:` | Newsletter from one creator |
+| One sender, a stable subject prefix recurs | `from:` + `subject:` | "Your Citi card was charged…" |
+| One sender mixes mail types, body keyword tags the right ones | `from:` + body keyword | Maven course announcements |
+| Many senders, same stable subject template | `subject:` only | "Your order has shipped" across retailers |
+| Many senders, same body keyword | body keyword only, no `from:` | OTPs across providers |
+| Mailing list with List-ID header | `list:` | Substack / Sequoia weekly |
+
+You don't have to trust the LLM blindly — every proposal page has a
+**sender-scope toggle** with three options:
+
+- **This sender only** — `from:alerts@info6.citi.com`
+- **This domain** — `from:citi.com` (catches every sub-address the same
+  brand uses)
+- **Any sender** — drops the `from:` clause entirely, falling back to
+  subject/keyword matching
+
+Click the toggle to broaden or narrow the filter in one click. The Gmail
+search query stays directly editable too, in case you want to hand-tune
+the keywords.
+
 ## Two flavors — pick one before you download
 
 QuickLabel ships in two branches with identical core code:
@@ -106,7 +141,10 @@ You'll land on `http://127.0.0.1:8765`. From there, set up both flows:
 3. Open any email in Gmail.
 4. Click the **Label this Email** bookmark. A new tab opens with the
    LLM-backed proposal.
-5. Tweak / confirm / apply. Done.
+5. Tweak / confirm / apply. Done. Open the **Customize** drawer to use
+   the sender-scope toggle (this sender / this domain / any sender)
+   if you want to broaden or narrow the filter before applying — see
+   [Smart filter design](#smart-filter-design--labels-broaden-across-senders-when-they-should).
 
 ### Inbox queue
 

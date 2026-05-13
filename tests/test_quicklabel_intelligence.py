@@ -234,6 +234,80 @@ def test_build_prompt_includes_from_keyword_in_filter_type_enum():
     assert "keyword" in prompt
 
 
+def test_parse_filter_keyword_only_no_from_clause():
+    """keyword_only filters drop the from: clause entirely so the same
+    category (e.g. OTP / verification code) gets caught regardless of
+    sender — Okta, Google, Slack, banks all emit different sender
+    addresses for the same email category."""
+    raw = json.dumps({
+        "chosen_label": "Security/OTP", "is_new_label": False,
+        "rationale": "Category arrives from many senders.",
+        "filter": {"type": "keyword_only", "from": None, "subject": None,
+                   "keyword": '"verification code" OR "one-time code"',
+                   "list_id": None},
+        "actions": {"inbox": "keep", "importance": "default",
+                    "mark_read": False, "star": False, "never_spam": False},
+        "confidence": 0.85,
+    })
+    p = parse_llm_response(raw)
+    assert "from:" not in p.filter_query
+    assert '"verification code"' in p.filter_query
+    assert '"one-time code"' in p.filter_query
+    # Criteria sent to Gmail: no from, no subject — just the body query
+    assert "from" not in p.filter_criteria
+    assert "subject" not in p.filter_criteria
+    assert p.filter_criteria.get("query") == '"verification code" OR "one-time code"'
+
+
+def test_parse_filter_subject_only_no_from_clause():
+    """subject_only filters use a stable subject template across many
+    senders. Common for cross-retailer shipping confirmations."""
+    raw = json.dumps({
+        "chosen_label": "Shopping/Shipping", "is_new_label": True,
+        "rationale": "Stable subject across many retailers.",
+        "filter": {"type": "subject_only", "from": None,
+                   "subject": "Your order has shipped",
+                   "keyword": None, "list_id": None},
+        "actions": {"inbox": "keep", "importance": "default",
+                    "mark_read": False, "star": False, "never_spam": False},
+        "confidence": 0.8,
+    })
+    p = parse_llm_response(raw)
+    assert "from:" not in p.filter_query
+    assert 'subject:"Your order has shipped"' in p.filter_query
+    assert "from" not in p.filter_criteria
+    assert p.filter_criteria.get("subject") == "Your order has shipped"
+
+
+def test_parse_filter_keyword_already_composed_query_passes_through():
+    """When the LLM emits a keyword that's already a composed Gmail query
+    (contains quotes or OR), we must NOT re-quote it — that would produce
+    invalid Gmail search syntax."""
+    raw = json.dumps({
+        "chosen_label": "OTP", "is_new_label": True, "rationale": "...",
+        "filter": {"type": "keyword_only", "from": None, "subject": None,
+                   "keyword": '"verification code" OR "security code"',
+                   "list_id": None},
+        "actions": {"inbox": "keep", "importance": "default",
+                    "mark_read": False, "star": False, "never_spam": False},
+        "confidence": 0.8,
+    })
+    p = parse_llm_response(raw)
+    # The pre-composed query passes through verbatim — no double-quoting.
+    assert p.filter_query == '"verification code" OR "security code"'
+
+
+def test_build_prompt_includes_new_filter_types_in_schema():
+    """subject_only and keyword_only must appear in the OUTPUT schema
+    enum or the LLM won't emit them."""
+    prompt = build_prompt(
+        email=_email(), body="x", signals=_signals(),
+        sender_stats=_stats(), existing_labels=[],
+    )
+    assert "subject_only" in prompt
+    assert "keyword_only" in prompt
+
+
 def test_body_excerpt_uses_head_and_tail_when_long():
     """Long bodies get head + tail rather than head-only, so distinguishing
     footer signals (sender brand, unsubscribe context) reach the LLM."""
