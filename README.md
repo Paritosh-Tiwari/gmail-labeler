@@ -23,6 +23,15 @@ new senders/threads, all in one review screen. The queue uses fast
 cheap). For any row where the suggestion isn't quite right, click
 **Regenerate with AI** to get a better LLM-backed proposal.
 
+### Describe a label rule in plain English
+
+If you know the category you want labeled before you see a specific
+email — *"any sign-in notifications should be labeled Security/Sign-In
+and skip the inbox"* — open `/describe` and type it. The LLM picks a
+label path, designs a Gmail filter for the category, and shows you a
+proposal with the estimated match count against your inbox. Iterate
+with the **Refine** textbox until it's right, then apply.
+
 Nothing leaves your computer except the unavoidable Gmail API calls.
 The LLM runs locally via Ollama. OAuth tokens live in your OS keyring.
 

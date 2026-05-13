@@ -12,8 +12,10 @@ import pytest
 from quicklabel.headers import EmailFingerprint
 from quicklabel.intelligence import (
     IntelligentProposal,
+    build_describe_prompt,
     build_prompt,
     intelligent_propose,
+    intelligent_propose_from_text,
     parse_llm_response,
     to_proposal,
 )
@@ -306,6 +308,130 @@ def test_build_prompt_includes_new_filter_types_in_schema():
     )
     assert "subject_only" in prompt
     assert "keyword_only" in prompt
+
+
+# --------------------------- description-to-filter ---------------------------
+
+def test_build_describe_prompt_includes_user_text_and_labels():
+    """The plain-English description must reach the LLM verbatim,
+    alongside the user's existing labels for style/anchor matching."""
+    prompt = build_describe_prompt(
+        description="Any sign-in notifications go under Security/Sign-In",
+        existing_labels=["Security", "Newsletters/Tech"],
+    )
+    assert "sign-in notifications" in prompt
+    assert "Security/Sign-In" in prompt
+    assert "Security" in prompt
+    assert "Newsletters/Tech" in prompt
+    # Output schema must still be present
+    assert "chosen_label" in prompt
+    assert "keyword_only" in prompt
+
+
+def test_build_describe_prompt_includes_refinement_when_given():
+    """Refinement text should be visible to the LLM as separate guidance."""
+    prompt = build_describe_prompt(
+        description="OTP emails go under Security",
+        existing_labels=[],
+        refinement="only Okta OTPs, not other providers",
+    )
+    assert "REFINEMENT" in prompt
+    assert "only Okta OTPs" in prompt
+
+
+def test_build_describe_prompt_omits_refinement_block_when_empty():
+    prompt = build_describe_prompt(
+        description="Any sign-in notifications go under Security",
+        existing_labels=[],
+    )
+    assert "REFINEMENT" not in prompt
+
+
+def test_intelligent_propose_from_text_happy_path():
+    """End-to-end: feed a description + canned LLM response, get a
+    parseable IntelligentProposal with the right filter shape."""
+    canned = json.dumps({
+        "chosen_label": "Security/Sign-In",
+        "is_new_label": True,
+        "rationale": "Cross-provider OTP / sign-in category.",
+        "filter": {
+            "type": "keyword_only", "from": None, "subject": None,
+            "keyword": '"verification code" OR "sign-in code" OR "one-time code"',
+            "list_id": None,
+        },
+        "actions": {"inbox": "keep", "importance": "default",
+                    "categorize": "updates",
+                    "mark_read": False, "star": False, "never_spam": False},
+        "confidence": 0.84,
+    })
+    calls: list[tuple[str, str]] = []
+
+    def fake_chat(prompt, system="", **kwargs):
+        calls.append((prompt, system))
+        return canned
+
+    p = intelligent_propose_from_text(
+        description="Any sign-in notification or verification code → Security/Sign-In",
+        existing_labels=["Security", "Newsletters"],
+        chat_fn=fake_chat,
+    )
+    assert p.chosen_label == "Security/Sign-In"
+    assert p.filter_criteria == {
+        "query": '"verification code" OR "sign-in code" OR "one-time code"'
+    }
+    assert "from:" not in p.filter_query
+    assert len(calls) == 1
+
+
+def test_intelligent_propose_from_text_retries_on_empty_response():
+    """Empty first response triggers a retry at higher num_predict —
+    same safety net as the email path."""
+    canned = json.dumps({
+        "chosen_label": "Security",
+        "is_new_label": False,
+        "rationale": "...",
+        "filter": {"type": "keyword_only", "from": None, "subject": None,
+                   "keyword": '"verification code"', "list_id": None},
+        "actions": {"inbox": "keep", "importance": "default",
+                    "mark_read": False, "star": False, "never_spam": False},
+        "confidence": 0.8,
+    })
+    responses = ["", canned]  # first empty, second valid
+
+    def fake_chat(prompt, system="", **kwargs):
+        return responses.pop(0)
+
+    p = intelligent_propose_from_text(
+        description="any sign-in notification",
+        existing_labels=["Security"],
+        chat_fn=fake_chat,
+    )
+    assert p.chosen_label == "Security"
+    assert "(retry)" in p.model
+
+
+def test_intelligent_propose_from_text_raises_on_persistent_failure():
+    """No heuristic fallback for descriptions — surface the error so the
+    UI can show it rather than silently producing nonsense."""
+    def fake_chat(prompt, system="", **kwargs):
+        return ""  # always empty
+
+    with pytest.raises(ValueError):
+        intelligent_propose_from_text(
+            description="any sign-in notification",
+            existing_labels=[],
+            chat_fn=fake_chat,
+        )
+
+
+def test_intelligent_propose_from_text_rejects_empty_description():
+    """Empty input is a programming bug — fail loudly."""
+    with pytest.raises(ValueError):
+        intelligent_propose_from_text(
+            description="   ",
+            existing_labels=[],
+            chat_fn=lambda *a, **kw: "",
+        )
 
 
 def test_body_excerpt_uses_head_and_tail_when_long():

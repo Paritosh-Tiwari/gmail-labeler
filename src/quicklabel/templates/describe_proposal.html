@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block title %}Proposal from description — QuickLabel{% endblock %}
+{% block content %}
+
+{% set est_count = proposal_filter.estimated_match_count %}
+
+{# Refine form — lives outside the apply form (nested forms are invalid HTML). #}
+<form method="POST" action="/describe" id="refine-form" style="display: none;">
+    <input type="hidden" name="nonce" value="{{ nonce }}">
+    <input type="hidden" name="description" value="{{ description }}">
+    <input type="hidden" name="refinement" id="refine-input-mirror">
+</form>
+
+<form method="POST" action="/apply" id="proposal-form"
+      data-existing-count="{{ est_count }}">
+    <input type="hidden" name="nonce" value="{{ nonce }}">
+
+    {# Hero: label + apply, above the fold #}
+    <div class="hero">
+        <div class="hero-label">
+            <span class="hero-label-text">{{ proposal_label.suggested_parent + '/' if proposal_label.suggested_parent else '' }}{{ proposal_label.suggested_name }}</span>
+            {% if label_status_value == "existing" %}
+                <span class="badge good">&#10003; existing</span>
+            {% elif label_status_value == "extends_existing" %}
+                <span class="badge">&#8627; extends existing</span>
+            {% else %}
+                <span class="badge warn">+ new label</span>
+            {% endif %}
+            {% if filter_status_value == "matches_existing" %}
+                <span class="badge good" title="The proposed filter matches one of your existing Gmail filters">&#10003; existing filter</span>
+            {% else %}
+                <span class="badge warn">+ new filter</span>
+            {% endif %}
+            {% if intel and intel.confidence < 0.6 %}
+                <span class="badge uncertain">uncertain &mdash; please verify</span>
+            {% endif %}
+        </div>
+
+        {% if filter_status_value == "matches_existing" and existing_filter_match %}
+        <div class="hero-summary" style="margin-top: 6px; color: var(--accent);">
+            &#8627; This filter already exists. Applying will extend it so your new label gets attached.
+        </div>
+        {% endif %}
+
+        <div class="hero-summary" style="margin-top: 12px;">
+            <strong>You said:</strong>
+            <span style="font-style: italic;">"{{ description }}"</span>
+        </div>
+
+        <div class="hero-summary" style="margin-top: 12px;">
+            Will label <strong id="will-label-count">{{ est_count }}</strong> existing emails
+            {% if est_count >= 1000 %}<span class="meta">(capped at 1000 for the preview)</span>{% endif %}
+            {% if intel and intel.suggested_actions %}
+                {% set sa = intel.suggested_actions %}
+                {% set extras = [] %}
+                {% if sa.inbox == 'skip' %}{% set _ = extras.append('skip inbox') %}{% endif %}
+                {% if sa.inbox == 'trash' %}{% set _ = extras.append('move to trash') %}{% endif %}
+                {% if sa.mark_read %}{% set _ = extras.append('mark as read') %}{% endif %}
+                {% if sa.categorize != 'none' %}{% set _ = extras.append('categorize as ' + sa.categorize) %}{% endif %}
+                {% if extras %}&middot; {{ extras | join(' &middot; ') | safe }}{% endif %}
+            {% endif %}
+        </div>
+
+        {% if intel %}
+        <div class="rationale" style="margin-top: 8px;">{{ intel.rationale }}</div>
+        {% endif %}
+
+        <div id="destructive-warning" class="warn-inline" style="display: none; margin-top: 12px;"></div>
+
+        <div style="display: flex; gap: 8px; margin-top: 16px; align-items: center; flex-wrap: wrap;">
+            <button type="submit" id="apply-btn" style="font-size: 16px; padding: 12px 28px;">Apply</button>
+            <a href="/describe" class="btn secondary"
+               style="background: white; color: var(--fg); border: 1px solid var(--border);">Start over</a>
+        </div>
+    </div>
+
+    {# Refine — controls (no <form> here; submits via the outer #refine-form) #}
+    <div class="card" style="margin-top: 24px;">
+        <h2>Refine</h2>
+        <p class="meta" style="margin-top:-4px;">
+            Not quite right? Add a refinement note and re-run the LLM. The original description is preserved.
+        </p>
+        <input type="text" id="refine-input" placeholder="e.g. only OTP codes, not new-device alerts"
+               style="width: 100%; padding: 10px; font-size: 14px; border: 1px solid var(--border); border-radius: 4px;">
+        <p style="margin-top: 10px;">
+            <button type="button" id="refine-btn" class="btn secondary"
+                    style="background: white; color: var(--fg); border: 1px solid var(--border); padding: 8px 18px;">
+                &#10024; Refine with AI
+            </button>
+            <span class="meta" style="margin-left: 8px; font-size: 12px;">
+                Re-runs the proposal with your original description + this note.
+            </span>
+        </p>
+    </div>
+
+    {# Customize: open by default for description mode since the LLM has less signal #}
+    <details style="margin-top: 24px;" open>
+        <summary style="cursor: pointer; color: var(--accent); font-weight: 500;">
+            Customize label, filter, scope &amp; actions
+        </summary>
+
+        <div style="margin-top: 16px;">
+            <h2>Label</h2>
+            <div class="card">
+                <label>Parent label (optional, will create if missing)</label>
+                <input type="text" name="parent_label" value="{{ proposal_label.suggested_parent or '' }}"
+                       placeholder="e.g. Security">
+
+                <label>Label name</label>
+                <input type="text" name="label_name" value="{{ proposal_label.suggested_name }}" required>
+            </div>
+
+            <h2>Filter</h2>
+            <div class="card">
+                <label>Gmail search query (will become a filter)</label>
+                <input type="text" name="filter_query" id="filter_query" value="{{ proposal_filter.query }}" required>
+                <p class="meta" style="margin-top: 6px;">
+                    Edit directly to tweak the match. Examples:
+                    <code>"verification code" OR "one-time code"</code>,
+                    <code>from:citi.com</code>, <code>subject:"Your order has shipped"</code>.
+                </p>
+            </div>
+
+            {% include "_scope.html" %}
+            {% include "_actions.html" %}
+
+            {% if intel %}
+            <details style="margin-top: 16px;">
+                <summary style="cursor: pointer; color: var(--accent); font-size: 12px;">
+                    AI details (model, prompt, raw response)
+                </summary>
+                <div style="margin-top: 8px; font-size: 12px; color: var(--muted);">
+                    <strong>Model:</strong> <code>{{ intel.model }}</code>
+                    &middot; <strong>Confidence:</strong> {{ '%.0f'|format(intel.confidence * 100) }}%
+                </div>
+                <div style="margin-top: 8px;">
+                    <strong style="font-size: 12px;">Prompt sent:</strong>
+                    <pre style="background: white; border: 1px solid var(--border); padding: 8px; border-radius: 4px; max-height: 300px; overflow: auto; font-size: 11px; white-space: pre-wrap;">{{ intel.prompt }}</pre>
+                </div>
+                {% if intel.raw_response %}
+                <div style="margin-top: 8px;">
+                    <strong style="font-size: 12px;">Raw response:</strong>
+                    <pre style="background: white; border: 1px solid var(--border); padding: 8px; border-radius: 4px; max-height: 300px; overflow: auto; font-size: 11px; white-space: pre-wrap;">{{ intel.raw_response }}</pre>
+                </div>
+                {% endif %}
+            </details>
+            {% endif %}
+        </div>
+    </details>
+</form>
+
+<script>
+// Wire the Refine button — copy text into the hidden mirror input on the
+// outer #refine-form, then submit that form.
+(function () {
+    var btn = document.getElementById('refine-btn');
+    var input = document.getElementById('refine-input');
+    var mirror = document.getElementById('refine-input-mirror');
+    var form = document.getElementById('refine-form');
+    if (!btn || !input || !mirror || !form) return;
+    function go() {
+        var v = (input.value || '').trim();
+        if (!v) { input.focus(); return; }
+        mirror.value = v;
+        form.submit();
+    }
+    btn.addEventListener('click', go);
+    input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); go(); }
+    });
+})();
+
+// Destructive-action confirmation (same logic as proposal.html)
+(function () {
+    var form = document.getElementById('proposal-form');
+    if (!form) return;
+    var existingCount = parseInt(form.dataset.existingCount || '0', 10);
+    var warnEl = document.getElementById('destructive-warning');
+
+    function currentRadioValue(name, dflt) {
+        var el = form.querySelector('input[name="' + name + '"]:checked');
+        return el ? el.value : dflt;
+    }
+
+    function recompute() {
+        var inbox = currentRadioValue('inbox_action', 'keep');
+        var importance = currentRadioValue('importance_action', 'default');
+        var scope = currentRadioValue('apply_scope', 'both');
+        var affectsExisting = (scope === 'existing_only' || scope === 'both');
+        var destructive = (inbox === 'skip' || inbox === 'trash' || importance === 'never_important');
+
+        if (destructive && affectsExisting && existingCount > 50) {
+            var verb = inbox === 'trash' ? 'move to trash' :
+                       inbox === 'skip' ? 'archive (skip inbox on)' :
+                       'mark not-important on';
+            warnEl.textContent = '⚠ Will ' + verb + ' ' + existingCount + ' existing emails. Hard to undo manually.';
+            warnEl.style.display = 'block';
+        } else {
+            warnEl.style.display = 'none';
+        }
+    }
+    form.addEventListener('change', recompute);
+    recompute();
+
+    form.addEventListener('submit', function (e) {
+        var inbox = currentRadioValue('inbox_action', 'keep');
+        var importance = currentRadioValue('importance_action', 'default');
+        var scope = currentRadioValue('apply_scope', 'both');
+        var affectsExisting = (scope === 'existing_only' || scope === 'both');
+        var destructive = (inbox === 'skip' || inbox === 'trash' || importance === 'never_important');
+
+        if (inbox === 'trash') return;
+        if (destructive && affectsExisting && existingCount > 50) {
+            var msg = 'About to apply to ' + existingCount + ' existing emails — continue?';
+            if (!confirm(msg)) e.preventDefault();
+        }
+    });
+})();
+</script>
+{% endblock %}
