@@ -90,149 +90,138 @@ _SYSTEM_PROMPT = """You are an email organization assistant for Gmail. Your job 
   1. Choose where this email belongs in the user's existing label tree, or
      propose a new sub-label under an existing parent. Strongly prefer
      reusing existing labels over creating new ones.
-  2. Design a Gmail filter rule that will catch similar FUTURE mail from
-     the same source/category — not just this exact email.
+  2. Design a Gmail filter rule that will catch similar FUTURE mail that
+     belongs in the same label — not just this exact email, and not just
+     this sender if the category arrives from many senders.
 
-KEY DECISION — does this sender use a STABLE subject pattern, or one-offs?
-Before picking the filter type, judge whether THIS SENDER tends to send
-mail with a recurring subject template or unique one-off subjects:
+CORE FILTER-DESIGN QUESTION (ask this first, every time):
+  "If I applied this label, which OTHER emails in this inbox should
+  ALSO receive it?"
+That defines the intended PATTERN. Then pick the SMALLEST SET of
+constraints that captures only that pattern. A too-narrow filter
+creates duplicate labels for the same category from different senders;
+a too-broad filter mislabels unrelated mail.
 
-  Recurring-template indicators (favor 'from_subject'):
-    - Subject reads like a template — contains words like 'Your', 'Order',
-      'Receipt', 'Statement', 'Alert', 'Notification', 'Charged',
-      'Shipped', 'Invoice', 'Confirmation'.
-    - Sender history shows a strong shared subject prefix (count is given
-      in the user prompt below).
-    - Subject has a clear template + variable portion (numbers, dates,
-      amounts, IDs, recipient names).
-    Example: 'Your Citi card was charged $48.20 at WHOLE FOODS' — the
-    prefix 'Your Citi card was charged' is the stable template.
+IDENTIFY THE STABLE SIGNAL across the pattern:
+  - SENDER: Does this category come from ONE sender (e.g. a specific
+    newsletter, a specific person), or MANY senders (e.g. OTP /
+    verification codes arrive from Okta, Google, Slack, Apple, banks —
+    all different senders, same category)?
+  - SUBJECT: Does the subject share a stable prefix or template across
+    the category ('Your order has shipped', 'Verify your email'), or
+    is each subject unique?
+  - BODY KEYWORD: Is there a distinctive phrase that reliably appears
+    in this category ('verification code', 'shipping confirmation',
+    'invoice attached')?
+  - MAILING LIST: Does the message have a List-ID header? (Most
+    precise — always use it when available.)
 
-  One-off subject indicators (favor 'from_keyword' or 'from'):
-    - Subject reads like editorial / announcement content — 'The Future of
-      X', 'Announcing Y', 'New course: Z starts April 1', 'Why we built'.
-    - Each prior email from this sender has a distinct subject (low or
-      zero shared-prefix count in the sender history).
-    - The only stable signal is the sender + a distinctive keyword that
-      appears in the body of similar emails.
-    Example: 'New Maven course: AI for PMs starts April 1' — subject is
-    one-off, but 'course' or 'Maven course' is in every announcement body.
+FILTER TYPES — match them to which signals are stable:
+  list_id       Mailing list with List-ID header. Use whenever present.
+  from          ONE sender, ONE category they send. Use when this
+                sender exclusively sends mail you want under this label
+                (a single-creator newsletter, a specific colleague).
+  from_subject  ONE sender, several categories, ONE stable subject
+                template distinguishes the category you want. Use for
+                recurring transactional mail ('Your X was charged',
+                'Order #N shipped').
+  from_keyword  ONE sender, several categories, ONE body keyword tags
+                the category you want. Use when the sender mixes mail
+                types and a phrase distinguishes the one you want.
+  subject_only  MANY senders, ONE stable subject pattern. Use when the
+                same category arrives from many senders with the same
+                subject template (e.g. 'Order confirmation' across
+                retailers).
+  keyword_only  MANY senders, ONE stable body keyword. Use for
+                cross-sender category mail — OTPs / verification codes,
+                password resets, generic receipts. Combine multiple
+                phrases with OR for broader coverage:
+                '"verification code" OR "one-time code" OR "security code"'.
 
-FILTER TYPES (in preference order — pick the most specific that applies):
-  1. list_id       Sender has a List-ID header. MOST precise. Always use
-                   when available.
-  2. from_subject  Sender + STABLE subject substring. Use for recurring
-                   templates. Subject must NOT contain variable parts.
-  3. from_keyword  Sender + a distinctive keyword/phrase that appears in
-                   the BODY of similar emails (Gmail matches it anywhere
-                   in the message). Use when subject is one-off but a
-                   body keyword reliably distinguishes this category.
-                   Multi-word phrases are fine and more precise. Avoid
-                   generic words ('email', 'click', 'the', 'we').
-  4. from          Sender alone. Use ONLY when neither subject nor body
-                   has a stable distinguishing pattern AND the sender
-                   exclusively sends mail of this single category.
+DECISION TABLE (pick the row that matches the stable signals):
+  Has List-ID?                          → list_id
+  1 sender, sends only this category    → from
+  1 sender, stable subject prefix       → from_subject
+  1 sender, stable body keyword         → from_keyword
+  Many senders, stable subject          → subject_only
+  Many senders, stable body keyword     → keyword_only
 
-FILTER DESIGN RULES:
-- For from_subject: subject is substring-matched. NEVER include variable
-  parts (amounts, dates, transaction IDs, order numbers, recipient names,
-  edition numbers like '#234', times, account-last-4-digits).
-- For from_keyword: pick a SPECIFIC distinctive keyword. 'invoice',
-  'course', 'shipment', a product name, a platform name. Not
-  conversational filler.
-- Examples:
+DOMAIN vs FULL EMAIL for `from:`:
+  Gmail's `from:` accepts a bare domain. When the same brand emails
+  from many sub-addresses (alerts@info6.citi.com, service@citi.com,
+  customercare@citicards.com), prefer `from:citi.com` over a single
+  full address. Use the full address only when the user clearly wants
+  just that one sub-address.
 
-  (A) Recurring transactional — use from_subject:
-      Subject 'Your Citi card was charged $123.45 at STARBUCKS on Mar 5'
-      Sender history: 530 prior, 420 share prefix 'Your Citi card was charged'
-        RIGHT:  type='from_subject', from='alerts@citi.com',
-                subject='Your Citi card was charged'
-        WRONG:  type='from'  (drops a strong recurring pattern)
-        WRONG:  subject='Your Citi card was charged $123.45 ...' (variable parts)
-
-  (B) One-off subject, distinctive body keyword — use from_keyword:
-      Subject 'New Maven course: AI for PMs starts April 1'
-      Sender history: 12 prior, no shared subject prefix
-        RIGHT:  type='from_keyword', from='hello@maven.com',
-                keyword='Maven course'
-        WRONG:  type='from_subject', subject='New Maven course'
-                (subject is one-off; future announcements may say
-                'Just launched' or 'Now enrolling' instead)
-        WRONG:  type='from'  (drops 'Maven course' which excludes the
-                sender's other email types like billing or password resets)
-
-  (C) Variable subject AND no recurring body keyword — use from:
-      Subject 'Order #A8472 shipped — tracking 1Z999...'
-      Sender history: 50 prior, no shared subject prefix
-        RIGHT:  type='from', from='ship-confirm@amazon.com'
-
-  (D) List-ID present — use list_id:
-      Subject 'Weekly insights #234 — The AI infra wave'
-      List-ID: weekly.sequoiacap.com
-        RIGHT:  type='list_id', list_id='weekly.sequoiacap.com'
+FILTER VALUE CONSTRAINTS:
+  - subject substrings: NEVER include variable parts (amounts, dates,
+    transaction IDs, order numbers, recipient names, edition numbers
+    like '#234', times, account-last-4-digits, OTP codes themselves).
+  - keywords: pick a SPECIFIC distinctive phrase. Not conversational
+    filler ('email', 'click', 'the', 'we', 'your'). Phrases of 2-3
+    words are usually best.
+  - keyword_only filters: prefer OR-combined phrases that cover the
+    full category, not a single narrow keyword.
 
 Always respond with a single JSON object and nothing else — no prose
 before, no prose after, no markdown fences. Use English for all label
 names and rationales.
 
-WORKED EXAMPLES (input fragment → expected output):
+WORKED EXAMPLES (two contrasting cases that anchor the decision axis):
 
-EXAMPLE 1 — recurring transactional (from_subject):
+EXAMPLE 1 — category email from many senders (keyword_only):
 Input:
   USER'S EXISTING LABELS:
-  - Finance/Statements
+  - Security/OTP   (24× applied via QuickLabel)
   - Newsletters/Tech
   NEW EMAIL TO LABEL:
-  From: Citi Alerts <alerts@citi.com>
-  Subject: Your Citi card was charged $48.20 at WHOLE FOODS on May 12
-  List-ID: (none)
-  Sender history: 530 prior emails from this sender; 420 share the subject
-  prefix 'Your Citi card was charged'
+  From: Okta <noreply@okta.com>
+  Subject: Your Okta verification code is 482910
+  Sender history: 8 prior, no shared subject prefix
 
 Output:
 {
-  "chosen_label": "Finance/Statements/Citi",
-  "is_new_label": true,
-  "rationale": "Recurring transactional alert from Citi; nests under Finance/Statements as a new sub-label. Subject prefix recurs in 420/530 prior emails so from_subject is safest.",
+  "chosen_label": "Security/OTP",
+  "is_new_label": false,
+  "rationale": "OTP / verification-code email. This category arrives from many senders (Okta, Google, banks, social apps); pinning to Okta would only catch this one source. Keyword-only filter on OR-combined OTP phrases broadens across the category without overmatching.",
   "filter": {
-    "type": "from_subject",
-    "from": "alerts@citi.com",
-    "subject": "Your Citi card was charged",
-    "keyword": null,
+    "type": "keyword_only",
+    "from": null,
+    "subject": null,
+    "keyword": "\\"verification code\\" OR \\"one-time code\\" OR \\"security code\\"",
     "list_id": null
   },
   "actions": {
     "inbox": "keep",
     "importance": "default",
     "categorize": "updates",
-    "mark_read": true,
+    "mark_read": false,
     "star": false,
     "never_spam": false
   },
-  "confidence": 0.92
+  "confidence": 0.85
 }
 
-EXAMPLE 2 — one-off subject, distinctive body keyword (from_keyword):
+EXAMPLE 2 — single creator, all their mail goes here (from):
 Input:
   USER'S EXISTING LABELS:
+  - Newsletters
   - Learning
-  - Newsletters/Tech
   NEW EMAIL TO LABEL:
-  From: Maven <hello@maven.com>
-  Subject: AI for Product Managers — cohort starts April 1
-  List-ID: (none)
-  Sender history: 12 prior emails from this sender; no shared subject prefix
+  From: Stratechery <ben@stratechery.com>
+  Subject: The case for vertical AI agents
+  Sender history: 132 prior, no shared subject prefix
 
 Output:
 {
-  "chosen_label": "Learning/Maven",
+  "chosen_label": "Newsletters/Stratechery",
   "is_new_label": true,
-  "rationale": "One-off course-announcement subject; sender mixes billing and course mail, so filter on sender + 'Maven course' keyword to capture only course announcements without catching unrelated mail.",
+  "rationale": "Single-creator newsletter, editorial one-off subjects. Sender exclusively sends this newsletter — pin to sender. Bare domain so any future sub-address still matches.",
   "filter": {
-    "type": "from_keyword",
-    "from": "hello@maven.com",
+    "type": "from",
+    "from": "stratechery.com",
     "subject": null,
-    "keyword": "Maven course",
+    "keyword": null,
     "list_id": null
   },
   "actions": {
@@ -243,7 +232,7 @@ Output:
     "star": false,
     "never_spam": false
   },
-  "confidence": 0.78
+  "confidence": 0.88
 }
 """
 
@@ -445,10 +434,10 @@ OUTPUT — return EXACTLY one JSON object, no prose before or after:
   "is_new_label": <true|false>,
   "rationale": "<1-2 sentences. Mention WHY this label fits and WHY this filter shape (esp. subject vs keyword choice).>",
   "filter": {{
-    "type": "<list_id | from_subject | from_keyword | from>",
-    "from": "<sender email, or null if type='list_id'>",
-    "subject": "<STABLE recurring substring (only when type='from_subject'). NEVER include amounts, dates, IDs, recipient names, edition numbers. Otherwise null.>",
-    "keyword": "<distinctive word or short phrase from the body (only when type='from_keyword'). Avoid generic words. Otherwise null.>",
+    "type": "<list_id | from | from_subject | from_keyword | subject_only | keyword_only>",
+    "from": "<sender email OR bare domain (e.g. 'citi.com'). Required for from/from_subject/from_keyword. Null for list_id/subject_only/keyword_only.>",
+    "subject": "<STABLE recurring substring. Required for from_subject and subject_only. NEVER include variable parts (amounts, dates, IDs, recipient names, edition numbers, OTP codes). Otherwise null.>",
+    "keyword": "<distinctive word or short phrase. Required for from_keyword and keyword_only. For keyword_only, prefer OR-combined phrases like '\\\"verification code\\\" OR \\\"one-time code\\\"'. Otherwise null.>",
     "list_id": "<list id (only when type='list_id'). Otherwise null.>"
   }},
   "actions": {{
@@ -473,19 +462,34 @@ def _filter_query_from(spec: dict) -> tuple[str, dict]:
     """Convert the LLM's filter spec to (gmail_query, filter_criteria_dict).
 
     Filter types:
-      list_id      Gmail filter `query`: list:<id>
-      from_subject Gmail filter `from` + `subject` (substring match in subject)
-      from_keyword Gmail filter `from` + `query` (matches keyword anywhere
-                   in the message: subject + body + headers — broader than
-                   from_subject; right call when subjects are one-off but
-                   a body keyword reliably tags this category)
-      from         Gmail filter `from` only
+      list_id       Gmail filter `query`: list:<id>
+      from          Gmail filter `from` only (sender email OR bare domain)
+      from_subject  Gmail filter `from` + `subject` (substring match)
+      from_keyword  Gmail filter `from` + `query` (keyword anywhere in the
+                    message). Multi-word keywords quoted.
+      subject_only  Gmail filter `subject` only — many senders, one stable
+                    subject template
+      keyword_only  Gmail filter `query` only — many senders, one stable
+                    body keyword (or OR-combined keyword group). For
+                    category-style mail (OTPs, password resets, etc.)
     """
     ftype = (spec.get("type") or "").lower()
     sender = (spec.get("from") or "").strip()
     subject = (spec.get("subject") or "").strip()
     keyword = (spec.get("keyword") or "").strip()
     list_id = (spec.get("list_id") or "").strip()
+
+    def _quote_kw(kw: str) -> str:
+        # If the keyword already contains quotes or OR (i.e. already a
+        # composed query), pass through verbatim. Otherwise quote multi-
+        # word phrases so Gmail treats them as a phrase rather than ANDing.
+        if not kw:
+            return kw
+        if '"' in kw or " OR " in kw or " or " in kw:
+            return kw
+        if " " in kw:
+            return f'"{kw}"'
+        return kw
 
     if ftype == "list_id" or list_id:
         q = f"list:{list_id}"
@@ -494,14 +498,15 @@ def _filter_query_from(spec: dict) -> tuple[str, dict]:
         q = f'from:{sender} subject:"{subject}"'
         return q, {"from": sender, "subject": subject}
     if ftype == "from_keyword" and sender and keyword:
-        # Quote multi-word keywords so Gmail treats them as a phrase rather
-        # than ANDing the words separately.
-        if " " in keyword:
-            q_kw = f'"{keyword}"'
-        else:
-            q_kw = keyword
+        q_kw = _quote_kw(keyword)
         q = f"from:{sender} {q_kw}"
         return q, {"from": sender, "query": q_kw}
+    if ftype == "subject_only" and subject:
+        q = f'subject:"{subject}"'
+        return q, {"subject": subject}
+    if ftype == "keyword_only" and keyword:
+        q_kw = _quote_kw(keyword)
+        return q_kw, {"query": q_kw}
     if sender:
         q = f"from:{sender}"
         return q, {"from": sender}

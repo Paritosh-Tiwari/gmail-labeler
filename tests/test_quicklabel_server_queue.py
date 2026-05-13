@@ -5,7 +5,7 @@ Here we just unit-test the pure helper for query -> criteria conversion.
 """
 from __future__ import annotations
 
-from quicklabel.server import _criteria_from_query
+from quicklabel.server import _criteria_from_query, _sender_domain
 
 
 def test_criteria_from_simple_from_query():
@@ -54,3 +54,24 @@ def test_criteria_from_subject_only():
 
 def test_criteria_handles_empty_input():
     assert _criteria_from_query("") == {"query": ""}
+
+
+def test_sender_domain_subdomain_strips_to_brand():
+    assert _sender_domain("alerts@info6.citi.com") == "citi.com"
+
+
+def test_sender_domain_no_subdomain_passes_through():
+    assert _sender_domain("noreply@okta.com") == "okta.com"
+
+
+def test_sender_domain_deep_subdomain():
+    assert _sender_domain("mail@a.b.c.example.com") == "example.com"
+
+
+def test_sender_domain_handles_empty_and_malformed():
+    assert _sender_domain("") == ""
+    assert _sender_domain("no-at-sign") == ""
+
+
+def test_sender_domain_lowercases():
+    assert _sender_domain("noreply@INFO6.Citi.COM") == "citi.com"

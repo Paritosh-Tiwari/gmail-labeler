@@ -276,6 +276,7 @@ def label_page(request: Request, id: str = Query(..., min_length=4)):
             "filter_status_value": filter_status_value,
             "existing_filter_match": existing_filter_match,
             "body_preview": body_preview,
+            "sender_domain": _sender_domain(email.sender_email),
         },
     )
 
@@ -694,6 +695,23 @@ def queue_decide(
         "apply_id": str(apply_id),
     })
     return RedirectResponse(url=f"/queue?{params}", status_code=303)
+
+
+def _sender_domain(email: str) -> str:
+    """Return the brand-level domain of a sender address.
+
+    Heuristic: last two dot-separated labels. Works for the common cases
+    (`alerts@info6.citi.com` -> `citi.com`, `noreply@okta.com` -> `okta.com`).
+    Fails for two-part TLDs like `.co.uk`; the user can override the filter
+    text directly when this matters.
+    """
+    if not email or "@" not in email:
+        return ""
+    domain = email.rsplit("@", 1)[1].strip().lower()
+    parts = [p for p in domain.split(".") if p]
+    if len(parts) <= 2:
+        return domain
+    return ".".join(parts[-2:])
 
 
 def _criteria_from_query(query: str) -> dict:
