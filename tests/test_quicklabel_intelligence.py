@@ -516,6 +516,41 @@ def test_intelligent_propose_retries_on_empty_response(store: Storage):
     assert calls[1] is None or calls[1] > 1500
 
 
+def test_qwen3_prompt_shim_appends_no_think():
+    """Qwen3 ships with thinking mode ON; /no_think disables it for a turn."""
+    from quicklabel.intelligence import _prepare_prompt_for_model
+    prompt = "Pick a label for this email."
+    out = _prepare_prompt_for_model(prompt, "qwen3:14b")
+    assert out.endswith("/no_think")
+    assert prompt in out
+
+
+def test_qwen3_prompt_shim_idempotent():
+    """If /no_think is already present, don't append a second one."""
+    from quicklabel.intelligence import _prepare_prompt_for_model
+    prompt = "Pick a label for this email.\n\n/no_think"
+    out = _prepare_prompt_for_model(prompt, "qwen3:14b")
+    assert out.count("/no_think") == 1
+
+
+def test_qwen3_prompt_shim_matches_variants():
+    """Catches all qwen3 tag variants regardless of size/quant suffix."""
+    from quicklabel.intelligence import _prepare_prompt_for_model
+    for model in ("qwen3:14b", "qwen3:32b", "qwen3:8b-instruct-q4_K_M", "QWEN3:7B"):
+        out = _prepare_prompt_for_model("test", model)
+        assert "/no_think" in out, f"shim missed {model}"
+
+
+def test_no_shim_for_non_qwen3_models():
+    """Other models — qwen2.5, gemma, llama, mistral, gpt-oss — should
+    not get /no_think appended (it's a Qwen3-specific token)."""
+    from quicklabel.intelligence import _prepare_prompt_for_model
+    for model in ("qwen2.5:14b", "gemma3:27b", "llama3", "mistral",
+                  "gpt-oss:20b", "phi-4"):
+        out = _prepare_prompt_for_model("test", model)
+        assert "/no_think" not in out, f"shim applied to {model} by mistake"
+
+
 def test_intelligent_propose_falls_back_when_retry_also_fails(store: Storage):
     """Two empty responses in a row should still fall back cleanly."""
     def empty_chat(prompt: str, **_) -> str:
