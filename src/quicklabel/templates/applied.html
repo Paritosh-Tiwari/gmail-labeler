@@ -9,8 +9,16 @@
 
     <h2>Filter</h2>
     {% if filter_created and not filter_created.error %}
-    <p>Server-side filter created. Future matching emails will get this label automatically.</p>
-    <p class="meta">Filter ID: <code>{{ filter_created.id }}</code></p>
+        {% if filter_created._extended %}
+            {% if filter_created._no_change %}
+            <p>This existing filter already had your new label attached &mdash; nothing to change.</p>
+            {% else %}
+            <p><strong>Existing filter extended.</strong> Your new label is now attached. The filter's other labels and actions were preserved.</p>
+            {% endif %}
+        {% else %}
+        <p>Server-side filter created. Future matching emails will get this label automatically.</p>
+        {% endif %}
+        <p class="meta">Filter ID: <code>{{ filter_created.id }}</code></p>
     {% elif filter_created and filter_created.error %}
     <p style="color: var(--warn);">Filter creation failed: <code>{{ filter_created.error }}</code></p>
     {% else %}
