@@ -238,6 +238,17 @@ def label_page(request: Request, id: str = Query(..., min_length=4)):
 
     status = label_status(ip.chosen_label, set(user_labels))
 
+    # Detect whether the LLM's proposed filter criteria match an existing
+    # Gmail filter. If so, surface that to the user so they know they're
+    # extending an existing filter rather than creating a new one.
+    filter_overlap = find_filter_conflicts(ip.filter_criteria, existing_filters)
+    if filter_overlap:
+        filter_status_value = "matches_existing"
+        existing_filter_match = filter_overlap[0]
+    else:
+        filter_status_value = "new"
+        existing_filter_match = None
+
     # Show enough body in the hero that the user can identify the email
     # without flipping back to Gmail. ~400 chars is roughly 2-3 lines.
     body_preview = (body or "").strip()[:400]
@@ -256,6 +267,8 @@ def label_page(request: Request, id: str = Query(..., min_length=4)):
             "signals": signals,
             "suggested_actions": ip.suggested_actions or ActionChoices(),
             "label_status_value": status,
+            "filter_status_value": filter_status_value,
+            "existing_filter_match": existing_filter_match,
             "body_preview": body_preview,
         },
     )

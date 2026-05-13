@@ -355,6 +355,22 @@ def test_build_prompt_includes_new_sections_when_provided():
     assert "Booleans MUST be unquoted" in prompt
 
 
+def test_existing_filters_block_encourages_reuse_not_avoidance():
+    """The prompt should tell the LLM that if an existing filter fits,
+    propose the same one (so the new label is attached) — NOT to avoid
+    duplicates. The earlier 'don't propose a duplicate' framing
+    discouraged the desired reuse behavior."""
+    prompt = build_prompt(
+        email=_email(), body="x", signals=_signals(),
+        sender_stats=_stats(), existing_labels=[],
+        existing_filters=[{"criteria": {"from": "alerts@citi.com"}}],
+    )
+    # Reuse language present
+    assert "propose the SAME filter" in prompt or "propose the same filter" in prompt.lower()
+    # Anti-duplicate language gone
+    assert "don't propose a duplicate" not in prompt.lower()
+
+
 def test_build_prompt_shows_gmail_category_when_present():
     from quicklabel.headers import EmailFingerprint
     email = EmailFingerprint(
