@@ -260,15 +260,110 @@ def _body_excerpt(body: str) -> str:
     )
 
 
+def _format_labels_block(
+    labels: list[str], usage_counts: dict[str, int] | None
+) -> str:
+    """Render the existing-labels list, ordering by usage count desc (so
+    actively-used labels float to the top — anti-proliferation hint) and
+    annotating each with `(N×)` if QuickLabel has applied it before.
+
+    Labels with no usage history get listed alphabetically after the used
+    ones.
+    """
+    if not labels:
+        return "(none yet)"
+    counts = usage_counts or {}
+    used = sorted(
+        (lbl for lbl in labels if lbl in counts),
+        key=lambda l: (-counts[l], l.lower()),
+    )
+    unused = sorted(
+        (lbl for lbl in labels if lbl not in counts),
+        key=str.lower,
+    )
+    ordered = used + unused
+    lines: list[str] = []
+    for lbl in ordered:
+        n = counts.get(lbl)
+        if n:
+            lines.append(f"- {lbl}  ({n}× applied via QuickLabel)")
+        else:
+            lines.append(f"- {lbl}")
+    return "\n".join(lines)
+
+
+def _criteria_to_gmail_query(criteria: dict) -> str:
+    """Render a Gmail filter `criteria` dict back into a human-readable
+    Gmail search query, for showing existing filters to the LLM."""
+    parts: list[str] = []
+    for key, val in (criteria or {}).items():
+        if not val:
+            continue
+        if key == "from":
+            parts.append(f"from:{val}")
+        elif key == "to":
+            parts.append(f"to:{val}")
+        elif key == "subject":
+            parts.append(f'subject:"{val}"')
+        elif key == "query":
+            parts.append(str(val))
+        elif key == "negatedQuery":
+            parts.append(f"-({val})")
+        elif key == "hasAttachment":
+            if val:
+                parts.append("has:attachment")
+    return " ".join(parts) if parts else "(empty criteria)"
+
+
+def _format_existing_filters(filters: list[dict] | None, cap: int = 20) -> str:
+    """Top N existing Gmail filters rendered as Gmail-search-style queries.
+    The LLM uses these to avoid proposing a duplicate."""
+    if not filters:
+        return "(none)"
+    queries: list[str] = []
+    for f in filters[:cap]:
+        q = _criteria_to_gmail_query(f.get("criteria") or {})
+        if q and q != "(empty criteria)":
+            queries.append(q)
+    if not queries:
+        return "(none)"
+    return "\n".join(f"- {q}" for q in queries)
+
+
+def _format_recent_applies(
+    recent: list[dict] | None, cap: int = 5
+) -> str:
+    """Last N labels the user actually applied via QuickLabel, as
+    few-shot examples reflecting THIS user's conventions (naming style,
+    depth, filter shape preference). Beats generic worked examples."""
+    if not recent:
+        return "(no recent QuickLabel applies yet)"
+    lines: list[str] = []
+    for r in recent[:cap]:
+        label = (r.get("label_name") or "").strip()
+        fq = (r.get("filter_query") or "").strip()
+        if not label:
+            continue
+        if fq:
+            lines.append(f"- {label}    (filter: {fq})")
+        else:
+            lines.append(f"- {label}")
+    return "\n".join(lines) if lines else "(no recent QuickLabel applies yet)"
+
+
 def build_prompt(
     email: EmailFingerprint,
     body: str,
     signals: Signals,
     sender_stats: SenderStats,
     existing_labels: list[str],
+    *,
+    label_usage_counts: dict[str, int] | None = None,
+    recent_applies: list[dict] | None = None,
+    existing_filters: list[dict] | None = None,
 ) -> str:
     labels = existing_labels[:MAX_LABELS_IN_PROMPT]
-    labels_block = "\n".join(f"- {lbl}" for lbl in labels) if labels else "(none yet)"
+    labels_block = _format_labels_block(labels, label_usage_counts)
 
     body_excerpt = _body_excerpt(body)
 
@@ -284,13 +379,29 @@ def build_prompt(
             f"'{sender_stats.common_subject_prefix}'"
         )
 
-    return f"""USER'S EXISTING LABELS (prefer to place under one of these):
+    gmail_category_line = (
+        f"Gmail's own category: {email.gmail_category}"
+        if email.gmail_category
+        else "Gmail's own category: (none assigned)"
+    )
+
+    recent_block = _format_recent_applies(recent_applies)
+    filters_block = _format_existing_filters(existing_filters)
+
+    return f"""USER'S EXISTING LABELS (prefer to place under one of these; counts show which are actively used):
 {labels_block}
+
+RECENT LABELS THIS USER APPLIED (style reference — match their naming conventions):
+{recent_block}
+
+EXISTING GMAIL FILTERS (don't propose a duplicate of any of these):
+{filters_block}
 
 NEW EMAIL TO LABEL:
 From: {email.sender_name or ''} <{email.sender_email}>
 Subject: {email.subject}
 List-ID: {email.list_id or '(none)'}
+{gmail_category_line}
 
 Sender history: {sender_line}
 
@@ -304,12 +415,15 @@ Body excerpt:
 
 TASK:
 1. Pick the best label path for this email. Reuse an existing label
-   verbatim if one fits. Otherwise propose a new sub-label under an
-   existing parent ('Parent/NewLeaf'). Top-level new labels are a last
-   resort — only when no existing parent fits.
+   verbatim if one fits, especially one with an apply count (proven
+   in use). Otherwise propose a new sub-label under an existing parent
+   ('Parent/NewLeaf'). Top-level new labels are a last resort — only
+   when no existing parent fits. Match the user's naming style as seen
+   in the RECENT LABELS section (case, separator depth, abbreviations).
 2. Design a Gmail filter that catches FUTURE similar mail. Re-read the
-   FILTER DESIGN RULES in the system message before choosing the
-   subject substring. If subject must be variable, prefer sender-only.
+   FILTER DESIGN RULES in the system message. If a near-equivalent
+   filter already exists (see EXISTING GMAIL FILTERS), drop confidence
+   and mention the overlap in your rationale.
 3. Suggest auto-actions only when clearly appropriate. Examples:
    - heavy promotional mail: inbox=skip, mark_read=true, categorize=promotions
    - social-network notifications: categorize=social
@@ -317,7 +431,13 @@ TASK:
    - transactional alerts (receipts, statements): mark_read=true
    When unsure, leave them at the defaults (keep / default / none / false).
 
-OUTPUT — return EXACTLY one JSON object, no prose before or after, no markdown:
+JSON FORMAT REMINDERS — strict:
+- Booleans MUST be unquoted `true` / `false`, NEVER the strings "true"/"false".
+- Nullable fields MUST be unquoted `null`, NEVER the string "null".
+- Use straight double quotes (\"), never smart quotes.
+- No trailing commas. No comments. No markdown fences (no ```).
+
+OUTPUT — return EXACTLY one JSON object, no prose before or after:
 
 {{
   "chosen_label": "<full path>",
@@ -338,7 +458,7 @@ OUTPUT — return EXACTLY one JSON object, no prose before or after, no markdown
     "star": <true|false>,
     "never_spam": <true|false>
   }},
-  "confidence": <number 0.0-1.0; lower if you had to guess on either label or filter>
+  "confidence": <number 0.0-1.0; lower if you had to guess on either label or filter, or if your filter overlaps with an existing one>
 }}
 """
 
@@ -514,11 +634,20 @@ def intelligent_propose(
     existing_labels: list[str],
     storage: Storage | None = None,
     chat_fn: ChatFn | None = None,
+    *,
+    label_usage_counts: dict[str, int] | None = None,
+    recent_applies: list[dict] | None = None,
+    existing_filters: list[dict] | None = None,
 ) -> IntelligentProposal:
     """Top-level: returns an IntelligentProposal. Caches via storage if given."""
     cache_key = _cache_key(email, body)
 
-    prompt = build_prompt(email, body, signals, sender_stats, existing_labels)
+    prompt = build_prompt(
+        email, body, signals, sender_stats, existing_labels,
+        label_usage_counts=label_usage_counts,
+        recent_applies=recent_applies,
+        existing_filters=existing_filters,
+    )
     model = get_model_name()
 
     if storage is not None:

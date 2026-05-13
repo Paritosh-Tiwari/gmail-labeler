@@ -258,6 +258,126 @@ def test_body_excerpt_returns_whole_body_when_short():
     assert _body_excerpt(short) == short
 
 
+# --------------------------- new prompt inputs ---------------------------
+
+def test_labels_block_orders_by_usage_count():
+    from quicklabel.intelligence import _format_labels_block
+    block = _format_labels_block(
+        labels=["Finance", "Newsletters/Tech", "Old/Abandoned", "Travel"],
+        usage_counts={"Newsletters/Tech": 12, "Finance": 4},
+    )
+    lines = block.splitlines()
+    # Used labels first (desc by count), then unused alphabetical
+    assert lines[0].startswith("- Newsletters/Tech")
+    assert "12×" in lines[0]
+    assert lines[1].startswith("- Finance")
+    assert "4×" in lines[1]
+    # Unused labels follow, alphabetically
+    assert lines[2].startswith("- Old/Abandoned")
+    assert "×" not in lines[2]
+    assert lines[3].startswith("- Travel")
+
+
+def test_labels_block_handles_empty():
+    from quicklabel.intelligence import _format_labels_block
+    assert _format_labels_block([], None) == "(none yet)"
+
+
+def test_criteria_to_gmail_query_renders_known_keys():
+    from quicklabel.intelligence import _criteria_to_gmail_query
+    assert _criteria_to_gmail_query(
+        {"from": "x@y.com", "subject": "Receipt"}
+    ) == 'from:x@y.com subject:"Receipt"'
+    assert _criteria_to_gmail_query(
+        {"query": "list:weekly.example.com"}
+    ) == "list:weekly.example.com"
+    assert _criteria_to_gmail_query(
+        {"from": "a@b.com", "hasAttachment": True}
+    ) == "from:a@b.com has:attachment"
+
+
+def test_format_existing_filters_caps_at_n():
+    from quicklabel.intelligence import _format_existing_filters
+    filters = [{"criteria": {"from": f"sender{i}@x.com"}} for i in range(50)]
+    out = _format_existing_filters(filters, cap=5)
+    assert out.count("\n") == 4  # 5 lines = 4 newlines
+    assert "sender0@x.com" in out
+    assert "sender49@x.com" not in out
+
+
+def test_format_existing_filters_empty_input():
+    from quicklabel.intelligence import _format_existing_filters
+    assert _format_existing_filters([]) == "(none)"
+    assert _format_existing_filters(None) == "(none)"
+
+
+def test_format_recent_applies_renders_label_and_filter():
+    from quicklabel.intelligence import _format_recent_applies
+    out = _format_recent_applies([
+        {"label_name": "Finance/Citi", "filter_query": "from:alerts@citi.com"},
+        {"label_name": "Newsletters/Tech", "filter_query": "list:weekly.x.com"},
+    ])
+    assert "Finance/Citi" in out
+    assert "from:alerts@citi.com" in out
+    assert "Newsletters/Tech" in out
+
+
+def test_format_recent_applies_empty():
+    from quicklabel.intelligence import _format_recent_applies
+    assert "(no recent" in _format_recent_applies(None)
+    assert "(no recent" in _format_recent_applies([])
+
+
+def test_build_prompt_includes_new_sections_when_provided():
+    prompt = build_prompt(
+        email=_email(), body="x", signals=_signals(),
+        sender_stats=_stats(),
+        existing_labels=["Newsletters/Tech", "Finance"],
+        label_usage_counts={"Newsletters/Tech": 7},
+        recent_applies=[
+            {"label_name": "Newsletters/Tech/Sequoia",
+             "filter_query": "list:weekly.sequoiacap.com"}
+        ],
+        existing_filters=[
+            {"criteria": {"from": "alerts@citi.com", "subject": "Charged"}}
+        ],
+    )
+    # Usage count shown on the label
+    assert "Newsletters/Tech" in prompt and "7×" in prompt
+    # Recent applies section
+    assert "RECENT LABELS THIS USER APPLIED" in prompt
+    assert "Newsletters/Tech/Sequoia" in prompt
+    # Existing filters section
+    assert "EXISTING GMAIL FILTERS" in prompt
+    assert "from:alerts@citi.com" in prompt
+    # JSON format reminder
+    assert "JSON FORMAT REMINDERS" in prompt
+    assert "Booleans MUST be unquoted" in prompt
+
+
+def test_build_prompt_shows_gmail_category_when_present():
+    from quicklabel.headers import EmailFingerprint
+    email = EmailFingerprint(
+        msg_id="m1", sender_email="a@b.com", sender_name="A",
+        subject="x", list_id=None, list_unsubscribe=False,
+        gmail_category="Promotions",
+    )
+    prompt = build_prompt(
+        email=email, body="x", signals=_signals(),
+        sender_stats=_stats(), existing_labels=[],
+    )
+    assert "Gmail's own category: Promotions" in prompt
+
+
+def test_build_prompt_indicates_no_category_when_absent():
+    prompt = build_prompt(
+        email=_email(), body="x", signals=_signals(),
+        sender_stats=_stats(), existing_labels=[],
+    )
+    # _email() doesn't set gmail_category
+    assert "(none assigned)" in prompt
+
+
 # --------------------------- intelligent_propose end-to-end ---------------------------
 
 @pytest.fixture
