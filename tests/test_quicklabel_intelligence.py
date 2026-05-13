@@ -483,6 +483,53 @@ def test_intelligent_propose_falls_back_on_invalid_json(store: Storage):
     assert p.confidence < 0.5
 
 
+def test_intelligent_propose_retries_on_empty_response(store: Storage):
+    """Reasoning models like gpt-oss:20b sometimes return empty visible
+    output because their hidden 'thinking' burned the num_predict budget.
+    First call empty -> retry once with bigger budget -> use that."""
+    calls = []
+
+    def flaky_chat(prompt: str, **kwargs) -> str:
+        calls.append(kwargs.get("num_predict"))
+        if len(calls) == 1:
+            return ""  # first call: empty (simulates reasoning-burnt budget)
+        return json.dumps({  # retry: good JSON
+            "chosen_label": "FI Updates/Monarch", "is_new_label": True,
+            "rationale": "Personal finance update.",
+            "filter": {"type": "from", "from": "email@email.monarch.com",
+                       "subject": None, "list_id": None},
+            "actions": {"inbox": "keep", "importance": "default",
+                        "mark_read": False, "star": False, "never_spam": False},
+            "confidence": 0.8,
+        })
+
+    p = intelligent_propose(
+        email=_email(), body="x", signals=_signals(),
+        sender_stats=_stats(), existing_labels=[],
+        storage=store, chat_fn=flaky_chat,
+    )
+    # Retry succeeded — got the good JSON, not the heuristic fallback
+    assert p.chosen_label == "FI Updates/Monarch"
+    assert p.confidence == 0.8
+    assert len(calls) == 2  # one initial + one retry
+    # The retry call used a bigger num_predict than the initial
+    assert calls[1] is None or calls[1] > 1500
+
+
+def test_intelligent_propose_falls_back_when_retry_also_fails(store: Storage):
+    """Two empty responses in a row should still fall back cleanly."""
+    def empty_chat(prompt: str, **_) -> str:
+        return ""
+
+    p = intelligent_propose(
+        email=_email(), body="x", signals=_signals(),
+        sender_stats=_stats(), existing_labels=[],
+        storage=store, chat_fn=empty_chat,
+    )
+    assert p.confidence < 0.5
+    assert "heuristic" in p.rationale.lower() or "fallback" in p.rationale.lower()
+
+
 # --------------------------- to_proposal adapter ---------------------------
 
 def test_to_proposal_for_existing_label_sets_no_parent():
