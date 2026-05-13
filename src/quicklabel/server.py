@@ -29,7 +29,11 @@ from .auth import (
 from .token_store import delete_token
 from .body import extract_body
 from .headers import fingerprint
-from .intelligence import intelligent_propose, to_proposal as ip_to_proposal
+from .intelligence import (
+    intelligent_propose,
+    intelligent_propose_from_text,
+    to_proposal as ip_to_proposal,
+)
 from .middleware import (
     AuditLogMiddleware,
     CSPHeaderMiddleware,
@@ -37,7 +41,7 @@ from .middleware import (
     SetupRedirectMiddleware,
 )
 from .preflight import find_filter_conflicts, is_destructive, should_confirm
-from .proposal import build_proposal
+from .proposal import FilterProposal, LabelProposal, Proposal, build_proposal
 from .resolve import resolve_to_message
 from .scan import scan_recent
 from .sender_stats import compute_sender_stats
@@ -279,6 +283,124 @@ def label_page(request: Request, id: str = Query(..., min_length=4)):
             "sender_domain": _sender_domain(email.sender_email),
         },
     )
+
+
+def _build_description_proposal_context(
+    *,
+    request: Request,
+    description: str,
+    refinement: str,
+) -> dict:
+    """Shared helper: call the LLM with a plain-English description,
+    build the template context. Used by POST /describe (initial) and
+    POST /describe/refine (iteration)."""
+    description = (description or "").strip()
+    if not description:
+        raise HTTPException(status_code=400, detail="description is required")
+
+    svc = get_service()
+    storage = get_storage()
+
+    user_labels = get_user_label_paths(svc)
+    label_usage_counts = storage.get_label_usage_counts()
+    recent_applies = [
+        {"label_name": e.label_name, "filter_query": e.filter_query}
+        for e in storage.get_apply_log(limit=5)
+        if e.undone_at is None
+    ]
+    try:
+        existing_filters = list_filters(svc)
+    except Exception:
+        existing_filters = []
+
+    try:
+        ip = intelligent_propose_from_text(
+            description=description,
+            existing_labels=user_labels,
+            refinement=refinement,
+            label_usage_counts=label_usage_counts,
+            recent_applies=recent_applies,
+            existing_filters=existing_filters,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    # Build a Proposal without a specific email — synthesize empty stats
+    # and use Gmail search for the real estimated count.
+    if "/" in ip.chosen_label and ip.is_new_label:
+        parent, _, name = ip.chosen_label.rpartition("/")
+        suggested_parent: str | None = parent or None
+        suggested_name = name
+    else:
+        suggested_parent = None
+        suggested_name = ip.chosen_label
+
+    est_count = 0
+    if ip.filter_query.strip():
+        try:
+            est_count = search_count(svc, ip.filter_query.strip(), cap=1000)
+        except Exception:
+            est_count = 0
+
+    fproposal = FilterProposal(
+        criteria=ip.filter_criteria,
+        query=ip.filter_query,
+        estimated_match_count=est_count,
+        rationale=ip.rationale,
+    )
+    lproposal = LabelProposal(
+        suggested_name=suggested_name,
+        suggested_parent=suggested_parent,
+        rationale=ip.rationale,
+    )
+
+    status = label_status(ip.chosen_label, set(user_labels))
+
+    filter_overlap = find_filter_conflicts(ip.filter_criteria, existing_filters)
+    filter_status_value = "matches_existing" if filter_overlap else "new"
+    existing_filter_match = filter_overlap[0] if filter_overlap else None
+
+    return {
+        "description": description,
+        "proposal_label": lproposal,
+        "proposal_filter": fproposal,
+        "nonce": NONCE,
+        "intel": ip,
+        "suggested_actions": ip.suggested_actions or ActionChoices(),
+        "label_status_value": status,
+        "filter_status_value": filter_status_value,
+        "existing_filter_match": existing_filter_match,
+    }
+
+
+@app.get("/describe", response_class=HTMLResponse)
+def describe_page(request: Request):
+    """Plain-English description → label + filter proposal.
+
+    User describes the labeling rule in their own words (e.g. 'any
+    sign-in notifications should be labeled Security/Sign-In'). The LLM
+    designs a Gmail filter using the same filter-design framework as
+    per-email proposals.
+    """
+    return templates.TemplateResponse(
+        request, "describe.html",
+        {"nonce": NONCE, "description": "", "error": ""},
+    )
+
+
+@app.post("/describe", response_class=HTMLResponse)
+def describe_submit(
+    request: Request,
+    nonce: str = Form(...),
+    description: str = Form(...),
+    refinement: str = Form(""),
+):
+    if nonce != NONCE:
+        raise HTTPException(status_code=403, detail="Invalid nonce.")
+    ctx = _build_description_proposal_context(
+        request=request, description=description, refinement=refinement,
+    )
+    return templates.TemplateResponse(request, "describe_proposal.html", ctx)
 
 
 def _maybe_delete_conflicting_filters(svc, criteria: dict, replace: bool) -> list[str]:

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Describe a label rule — QuickLabel{% endblock %}
+{% block content %}
+<h1>Describe a label rule</h1>
+<p class="meta">
+    Tell QuickLabel what you want labeled in plain English. The LLM will
+    pick a label name, design a Gmail filter to match the category, and
+    show you the proposal before anything is created.
+</p>
+
+{% if error %}
+<div class="card" style="border-left: 3px solid #c5221f;">
+    <p style="color: #c5221f;">{{ error }}</p>
+</div>
+{% endif %}
+
+<form method="POST" action="/describe">
+    <input type="hidden" name="nonce" value="{{ nonce }}">
+    <div class="card">
+        <label for="description">Your rule</label>
+        <textarea id="description" name="description" rows="5" required
+                  placeholder="e.g. Any sign-in notifications or verification codes should go under Security/Sign-In and skip the inbox."
+                  style="width: 100%; padding: 10px; font-size: 14px; border: 1px solid var(--border); border-radius: 4px; font-family: inherit;">{{ description }}</textarea>
+
+        <p class="meta" style="margin-top: 10px;">
+            Tips:
+        </p>
+        <ul class="meta" style="margin-top: 4px; font-size: 12px;">
+            <li>Name the <strong>category</strong> rather than one specific sender — the LLM will broaden to other senders that send the same category.</li>
+            <li>You can name a label path: "<em>Finance/Receipts</em>", "<em>Newsletters/Tech</em>".</li>
+            <li>Mention auto-actions if you want them: "<em>skip inbox</em>", "<em>mark as read</em>", "<em>star</em>".</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <button type="submit" style="font-size: 16px; padding: 12px 28px;">
+            Generate proposal
+        </button>
+        &nbsp;
+        <a href="/" class="btn secondary"
+           style="background: white; color: var(--fg); border: 1px solid var(--border);">Cancel</a>
+    </div>
+</form>
+{% endblock %}

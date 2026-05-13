@@ -747,6 +747,144 @@ def intelligent_propose(
     return p
 
 
+# --------------------------- description-to-filter ---------------------------
+
+def build_describe_prompt(
+    description: str,
+    existing_labels: list[str],
+    *,
+    refinement: str = "",
+    label_usage_counts: dict[str, int] | None = None,
+    recent_applies: list[dict] | None = None,
+    existing_filters: list[dict] | None = None,
+) -> str:
+    """User prompt for the description-to-filter task. Reuses the same
+    system prompt (filter-design framework) but the input is the user's
+    plain-English request, not a specific email."""
+    labels = existing_labels[:MAX_LABELS_IN_PROMPT]
+    labels_block = _format_labels_block(labels, label_usage_counts)
+    recent_block = _format_recent_applies(recent_applies)
+    filters_block = _format_existing_filters(existing_filters)
+
+    refinement_block = ""
+    if refinement and refinement.strip():
+        refinement_block = (
+            "\nREFINEMENT — the user reviewed the previous proposal and "
+            "wants this adjustment. Honor it precisely:\n"
+            f"\"\"\"\n{refinement.strip()}\n\"\"\"\n"
+        )
+
+    return f"""USER'S EXISTING LABELS (prefer to place under one of these; counts show which are actively used):
+{labels_block}
+
+RECENT LABELS THIS USER APPLIED (style reference — match their naming conventions):
+{recent_block}
+
+EXISTING GMAIL FILTERS (if one of these already fits the rule, propose the SAME filter — we'll attach the new label to it):
+{filters_block}
+
+NEW LABEL RULE — described by the user in their own words. There is NO specific email to anchor on; design the filter to match the CATEGORY they described:
+\"\"\"
+{description.strip()}
+\"\"\"
+{refinement_block}
+TASK:
+1. Pick a label path. Reuse an existing label verbatim if one fits. Otherwise propose 'Parent/NewLeaf' under an existing parent when possible. Match the user's naming style from the RECENT LABELS section.
+2. Design a Gmail filter that catches the category the user described. Re-read the FILTER-DESIGN framework in the system message. Do NOT anchor on a single sender unless the user explicitly named one — for category-style descriptions ('OTP', 'sign-in alerts', 'shipping notifications'), prefer keyword_only or subject_only with OR-combined phrases.
+3. If the description is ambiguous (e.g. 'sign-in notifications' could mean OTP codes, login-success alerts, or new-device warnings), pick the most common interpretation and explain WHY in the rationale. The user can refine.
+4. Suggest auto-actions only when the description implies them ('skip inbox', 'mark read', 'star important', etc.). Otherwise leave defaults.
+
+JSON FORMAT REMINDERS — strict:
+- Booleans MUST be unquoted `true` / `false`, NEVER the strings "true"/"false".
+- Nullable fields MUST be unquoted `null`, NEVER the string "null".
+- Use straight double quotes (\"), never smart quotes.
+- No trailing commas. No comments. No markdown fences (no ```).
+
+OUTPUT — return EXACTLY one JSON object, no prose before or after:
+
+{{
+  "chosen_label": "<full path>",
+  "is_new_label": <true|false>,
+  "rationale": "<1-2 sentences. Mention WHY this label fits and WHY this filter shape.>",
+  "filter": {{
+    "type": "<list_id | from | from_subject | from_keyword | subject_only | keyword_only>",
+    "from": "<sender email OR bare domain — ONLY if the user named a sender. Otherwise null.>",
+    "subject": "<stable subject substring — ONLY when type uses subject. NEVER include variable parts. Otherwise null.>",
+    "keyword": "<distinctive keyword or OR-combined phrases — REQUIRED for from_keyword and keyword_only. Prefer OR-combined for category descriptions. Otherwise null.>",
+    "list_id": "<list id — ONLY if the user named a mailing list. Otherwise null.>"
+  }},
+  "actions": {{
+    "inbox": "<keep | skip | trash>",
+    "importance": "<default | important | never_important>",
+    "categorize": "<none | personal | social | promotions | updates | forums>",
+    "mark_read": <true|false>,
+    "star": <true|false>,
+    "never_spam": <true|false>
+  }},
+  "confidence": <number 0.0-1.0; lower if the description is ambiguous>
+}}
+"""
+
+
+def intelligent_propose_from_text(
+    description: str,
+    existing_labels: list[str],
+    chat_fn: ChatFn | None = None,
+    *,
+    refinement: str = "",
+    label_usage_counts: dict[str, int] | None = None,
+    recent_applies: list[dict] | None = None,
+    existing_filters: list[dict] | None = None,
+) -> IntelligentProposal:
+    """Build an IntelligentProposal from a plain-English description.
+
+    Symmetric with intelligent_propose() but takes no email context — the
+    user describes the category they want labeled and the LLM designs the
+    filter. Retry-once on parse failure, same as the per-email path.
+    Raises ValueError if the LLM can't produce a parseable proposal
+    after retry; there's no heuristic fallback for descriptions
+    (heuristics need an email to inspect).
+    """
+    if not description or not description.strip():
+        raise ValueError("description is required")
+
+    prompt = build_describe_prompt(
+        description, existing_labels,
+        refinement=refinement,
+        label_usage_counts=label_usage_counts,
+        recent_applies=recent_applies,
+        existing_filters=existing_filters,
+    )
+    model = get_model_name()
+    chat = chat_fn or _default_chat_fn()
+
+    raw = chat(prompt, system=_SYSTEM_PROMPT)
+
+    retried = False
+    try:
+        p = parse_llm_response(raw)
+    except ValueError as first_err:
+        try:
+            raw_retry = chat(prompt, system=_SYSTEM_PROMPT, num_predict=3500)
+            retried = True
+        except Exception:
+            raw_retry = ""
+        try:
+            p = parse_llm_response(raw_retry) if raw_retry else None
+        except ValueError:
+            p = None
+        if p is None:
+            raise ValueError(
+                f"LLM did not return a parseable proposal (retried={retried}): {first_err}"
+            )
+        raw = raw_retry
+
+    p.cache_key = ""  # description text is the cache key, but we don't cache
+    p.prompt = prompt
+    p.model = model + (" (retry)" if retried else "")
+    return p
+
+
 # --------------------------- adapter to existing Proposal ---------------------------
 
 def to_proposal(
