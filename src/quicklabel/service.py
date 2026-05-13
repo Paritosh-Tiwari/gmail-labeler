@@ -82,6 +82,99 @@ def create_label_filter(
     )
 
 
+def merge_filter_action(
+    existing_action: dict,
+    new_label_id: str | None,
+    extra_add_label_ids: list[str] | None = None,
+    extra_remove_label_ids: list[str] | None = None,
+) -> dict:
+    """Pure merge: combine an existing filter's action with a new label
+    plus any extra mutations. Used when extending an existing filter
+    rather than creating a duplicate.
+
+    Behavior:
+      - addLabelIds: union of (existing + [new_label_id] + extras), de-duped
+        preserving order
+      - removeLabelIds: union of (existing + extras), de-duped
+      - forward: preserved as-is from existing action (we don't ask the
+        user about forwarding when extending)
+
+    Returns the merged action dict ready to pass to filters.create.
+    """
+    existing_adds = list(existing_action.get("addLabelIds") or [])
+    existing_removes = list(existing_action.get("removeLabelIds") or [])
+    extra_adds = list(extra_add_label_ids or [])
+    extra_removes = list(extra_remove_label_ids or [])
+
+    candidate_adds: list[str] = list(existing_adds)
+    if new_label_id:
+        candidate_adds.append(new_label_id)
+    candidate_adds.extend(extra_adds)
+    merged_adds = list(dict.fromkeys(candidate_adds))
+
+    merged_removes = list(dict.fromkeys(existing_removes + extra_removes))
+
+    out: dict = {}
+    if merged_adds:
+        out["addLabelIds"] = merged_adds
+    if merged_removes:
+        out["removeLabelIds"] = merged_removes
+    fwd = existing_action.get("forward")
+    if fwd:
+        out["forward"] = fwd
+    return out
+
+
+def extend_filter_with_label(
+    service,
+    existing_filter: dict,
+    new_label_id: str,
+    extra_add_label_ids: list[str] | None = None,
+    extra_remove_label_ids: list[str] | None = None,
+) -> dict:
+    """Attach a new label to an existing Gmail filter.
+
+    Gmail filters are immutable, so 'extending' is implemented as
+    delete-then-recreate with merged actions. We preserve the original
+    criteria + addLabelIds + removeLabelIds + forward.
+
+    Short-circuits if the new label (and any extras) are already in the
+    existing action — returns the existing filter dict with `_extended`
+    and `_no_change` flags so callers can render the right success copy.
+
+    Returns the new filter dict with an `_extended: True` flag.
+    """
+    from lib.gmail_client import delete_filter
+
+    existing_action = existing_filter.get("action") or {}
+    merged = merge_filter_action(
+        existing_action,
+        new_label_id,
+        extra_add_label_ids=extra_add_label_ids,
+        extra_remove_label_ids=extra_remove_label_ids,
+    )
+
+    existing_adds = set(existing_action.get("addLabelIds") or [])
+    existing_removes = set(existing_action.get("removeLabelIds") or [])
+    merged_adds = set(merged.get("addLabelIds") or [])
+    merged_removes = set(merged.get("removeLabelIds") or [])
+    if merged_adds == existing_adds and merged_removes == existing_removes:
+        # No-op — return the existing filter as-is so the caller knows.
+        return {**existing_filter, "_extended": True, "_no_change": True}
+
+    criteria = existing_filter.get("criteria") or {}
+
+    # Delete first to avoid duplicate-criteria errors on re-create.
+    delete_filter(service, existing_filter["id"])
+
+    body = {"criteria": criteria, "action": merged}
+    new_filter = service.users().settings().filters().create(
+        userId="me", body=body,
+    ).execute()
+    new_filter["_extended"] = True
+    return new_filter
+
+
 def backprop_label(
     service,
     query: str,

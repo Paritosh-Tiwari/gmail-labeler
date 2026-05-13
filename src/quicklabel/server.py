@@ -41,7 +41,13 @@ from .proposal import build_proposal
 from .resolve import resolve_to_message
 from .scan import scan_recent
 from .sender_stats import compute_sender_stats
-from .service import backprop_label, create_label_filter, ensure_label, reverse_backprop
+from .service import (
+    backprop_label,
+    create_label_filter,
+    ensure_label,
+    extend_filter_with_label,
+    reverse_backprop,
+)
 from .settings import HOST, PORT, _SETTINGS_PATH, Settings, load_settings, save_settings
 from .signals import extract_signals
 from .storage import Storage
@@ -412,12 +418,29 @@ def apply(
 
     filter_created = None
     if do_filter:
+        # Auto-merge: if the proposed criteria match an existing Gmail
+        # filter and the user did NOT opt to wipe-and-recreate, extend
+        # the existing filter (delete + recreate with merged action)
+        # rather than create a duplicate.
+        matching_existing: list[dict] = []
+        if replace_conflicts != "yes":
+            try:
+                matching_existing = find_filter_conflicts(criteria, list_filters(svc))
+            except Exception:
+                matching_existing = []
         try:
-            filter_created = create_label_filter(
-                svc, criteria, label_id,
-                extra_add_label_ids=extra_add,
-                extra_remove_label_ids=extra_remove,
-            )
+            if matching_existing:
+                filter_created = extend_filter_with_label(
+                    svc, matching_existing[0], label_id,
+                    extra_add_label_ids=extra_add,
+                    extra_remove_label_ids=extra_remove,
+                )
+            else:
+                filter_created = create_label_filter(
+                    svc, criteria, label_id,
+                    extra_add_label_ids=extra_add,
+                    extra_remove_label_ids=extra_remove,
+                )
         except Exception as e:
             filter_created = {"error": str(e)}
 
