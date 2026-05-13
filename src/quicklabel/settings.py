@@ -16,9 +16,15 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+# HOST must be a loopback address. middleware.HostValidationMiddleware
+# allows only 127.0.0.1 / localhost / [::1] in the Host header, and this
+# bind value has to stay symmetric. Do NOT change to 0.0.0.0 or a LAN IP
+# without also widening the allow-list — otherwise the server becomes
+# reachable from the network and the rebinding defense becomes moot.
 HOST = "127.0.0.1"
 
 DEFAULT_PORT = 8765
+_MIN_PORT, _MAX_PORT = 1024, 65535
 DEFAULT_LLM_MODEL = "gpt-oss:20b"
 DEFAULT_LOG_LEVEL = "INFO"
 
@@ -41,11 +47,20 @@ def _read_json(path: Path) -> dict:
         return {}
 
 
+def _coerce_port(value: int) -> int:
+    """Clamp a port to the unprivileged-TCP range or fall back to default.
+    Avoids uvicorn crashing on out-of-range values from a stale settings
+    file or a typo in QUICKLABEL_PORT."""
+    if _MIN_PORT <= value <= _MAX_PORT:
+        return value
+    return DEFAULT_PORT
+
+
 def load_settings(settings_path: Path = _SETTINGS_PATH) -> Settings:
     """Build a Settings object from file + env overrides + defaults."""
     data = _read_json(settings_path)
     s = Settings(
-        port=int(data.get("port", DEFAULT_PORT)),
+        port=_coerce_port(int(data.get("port", DEFAULT_PORT))),
         llm_model=str(data.get("llm_model", DEFAULT_LLM_MODEL)),
         log_level=str(data.get("log_level", DEFAULT_LOG_LEVEL)),
     )
@@ -53,7 +68,7 @@ def load_settings(settings_path: Path = _SETTINGS_PATH) -> Settings:
     # doesn't brick the server)
     if "QUICKLABEL_PORT" in os.environ:
         try:
-            s.port = int(os.environ["QUICKLABEL_PORT"])
+            s.port = _coerce_port(int(os.environ["QUICKLABEL_PORT"]))
         except ValueError:
             pass
     if "QUICKLABEL_LLM_MODEL" in os.environ:

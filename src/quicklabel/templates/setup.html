@@ -43,16 +43,23 @@
     own OAuth client — nothing is shared with anyone else.
 </p>
 
-{% if error %}<div class="err-banner"><strong>{{ error_title }}:</strong> {{ error }}</div>{% endif %}
+{% if error %}<div class="err-banner"><strong>Your last setup action failed:</strong> {{ error }}</div>{% endif %}
 
 {% if state.value == 'ready' %}
 <div class="card">
     <h2 style="color: var(--good);">✓ All set</h2>
     <p>QuickLabel is authorized and ready. <a href="/" class="btn">Go to landing page</a></p>
-    <p class="meta" style="margin-top: 12px;">
-        Need to re-authorize (e.g. with a different Google account)?
-        Use <a href="/setup/reset">Reset auth</a>.
-    </p>
+    <form method="post" action="/setup/reset" style="margin-top: 12px;"
+          onsubmit="return confirm('Drop the stored Gmail authorization token? You will need to re-authorize next time you use QuickLabel.');">
+        <input type="hidden" name="nonce" value="{{ nonce }}">
+        <p class="meta">
+            Need to re-authorize (e.g. with a different Google account)?
+            <button type="submit" class="btn secondary"
+                    style="background: white; color: var(--fg); border: 1px solid var(--border); margin-left: 8px;">
+                Reset auth
+            </button>
+        </p>
+    </form>
 </div>
 {% else %}
 

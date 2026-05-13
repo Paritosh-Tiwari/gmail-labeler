@@ -189,6 +189,17 @@ Everything is local:
 The `data/` folder is the only thing you need to back up. Deleting it
 is a clean factory reset.
 
+> **Multi-user machine note.** QuickLabel doesn't apply restrictive
+> ACLs to the `data/` folder. On a personal computer this is fine —
+> your user profile already prevents other accounts from reading
+> `C:\Users\<you>\...`. On a *shared* machine where Administrators or
+> other accounts can browse your profile, `credentials.json`,
+> `quicklabel.log`, and `quicklabel.db` (sender metadata + scanned-email
+> previews + LLM cache) become readable by them. The OAuth refresh
+> token, the highest-value secret, is stored in the OS keyring and
+> stays per-user-encrypted either way. If you're on a shared machine,
+> consider moving the install to an encrypted volume.
+
 ## One-time Google Cloud setup
 
 You need your own OAuth client (each user makes their own; nothing is
