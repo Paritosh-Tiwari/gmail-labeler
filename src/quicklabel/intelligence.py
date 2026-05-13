@@ -581,6 +581,26 @@ def parse_llm_response(raw: str) -> IntelligentProposal:
 ChatFn = Callable[..., str]
 
 
+def _prepare_prompt_for_model(prompt: str, model: str) -> str:
+    """Per-model prompt shims.
+
+    Qwen3 ships with reasoning ('thinking') mode ON by default — the
+    model emits hidden <think> tokens before any visible output, exactly
+    like gpt-oss. In QuickLabel's context the thinking burns the
+    num_predict budget without measurably improving label accuracy
+    (see model-comparison runs). Appending `/no_think` to the user
+    prompt is Qwen3's documented way to disable thinking for a turn.
+
+    No shim is available for gpt-oss style models (their reasoning is
+    architectural, not prompt-controlled); for those we rely on the
+    retry-once logic in intelligent_propose.
+    """
+    name = (model or "").lower()
+    if name.startswith("qwen3") and "/no_think" not in prompt:
+        return prompt.rstrip() + "\n\n/no_think"
+    return prompt
+
+
 def _default_chat_fn() -> ChatFn:
     """Default chat_fn that calls Ollama via the existing helper.
 
@@ -593,8 +613,11 @@ def _default_chat_fn() -> ChatFn:
 
     def _call(prompt: str, system: str = _SYSTEM_PROMPT,
               num_predict: int = 1500) -> str:
+        model = get_model_name()
         return chat(
-            client, prompt=prompt, model=get_model_name(), system=system,
+            client,
+            prompt=_prepare_prompt_for_model(prompt, model),
+            model=model, system=system,
             # temp=0 for max determinism — labels and filters are decisions,
             # not creative writing. (Reasoning models like gpt-oss are still
             # non-deterministic here despite temp=0 because their hidden
