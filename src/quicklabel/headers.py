@@ -15,6 +15,30 @@ class EmailFingerprint:
     subject: str
     list_id: str | None
     list_unsubscribe: bool
+    # Gmail's own categorization (Primary/Social/Promotions/Updates/Forums)
+    # if it tagged this message. Free signal — used as a prior in the LLM
+    # prompt. None when Gmail didn't apply any CATEGORY_* system label.
+    gmail_category: str | None = None
+
+
+# Gmail system labels -> human-friendly category names. Categories not in
+# this map are dropped (we don't surface CHAT, IMPORTANT, STARRED, etc.
+# as "categories" — those have separate semantics).
+_GMAIL_CATEGORY_MAP = {
+    "CATEGORY_PERSONAL": "Primary",
+    "CATEGORY_SOCIAL": "Social",
+    "CATEGORY_PROMOTIONS": "Promotions",
+    "CATEGORY_UPDATES": "Updates",
+    "CATEGORY_FORUMS": "Forums",
+}
+
+
+def _extract_gmail_category(label_ids: list[str]) -> str | None:
+    """First CATEGORY_* system label in `label_ids`, mapped to its name."""
+    for lid in label_ids or []:
+        if lid in _GMAIL_CATEGORY_MAP:
+            return _GMAIL_CATEGORY_MAP[lid]
+    return None
 
 
 _ADDR_RE = re.compile(r"<([^>]+)>")
@@ -66,4 +90,5 @@ def fingerprint(message: dict) -> EmailFingerprint:
         subject=headers.get("subject", ""),
         list_id=parse_list_id(headers.get("list-id", "")),
         list_unsubscribe=bool(headers.get("list-unsubscribe")),
+        gmail_category=_extract_gmail_category(message.get("labelIds", [])),
     )

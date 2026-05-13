@@ -211,10 +211,28 @@ def label_page(request: Request, id: str = Query(..., min_length=4)):
     signals = extract_signals(email, body)
     user_labels = get_user_label_paths(svc)
 
+    # Extra prompt inputs: usage history + existing filters give the LLM
+    # the user's actual conventions and let it dodge filter duplicates.
+    storage = get_storage()
+    label_usage_counts = storage.get_label_usage_counts()
+    recent_applies = [
+        {"label_name": e.label_name, "filter_query": e.filter_query}
+        for e in storage.get_apply_log(limit=5)
+        if e.undone_at is None
+    ]
+    try:
+        existing_filters = list_filters(svc)
+    except Exception:
+        # Don't fail the proposal just because filter listing flaked
+        existing_filters = []
+
     ip = intelligent_propose(
         email=email, body=body, signals=signals,
         sender_stats=stats, existing_labels=user_labels,
-        storage=get_storage(),
+        storage=storage,
+        label_usage_counts=label_usage_counts,
+        recent_applies=recent_applies,
+        existing_filters=existing_filters,
     )
     proposal = ip_to_proposal(email, stats, ip)
 

@@ -489,6 +489,19 @@ class Storage:
             ).fetchall()
             return [r["filter_query"] for r in rows if r["filter_query"]]
 
+    def get_label_usage_counts(self) -> dict[str, int]:
+        """Count how many times each label has been applied (and not undone)
+        via QuickLabel. Surfaces 'active' user labels in the LLM prompt so
+        the model leans toward reusing labels that are getting traction,
+        not labels the user tried once and abandoned."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT label_name, COUNT(*) AS n FROM apply_log "
+                "WHERE undone_at IS NULL "
+                "GROUP BY label_name"
+            ).fetchall()
+            return {r["label_name"]: int(r["n"]) for r in rows if r["label_name"]}
+
     def mark_pending_applied_for_sender(self, sender_email: str, list_id: str | None) -> int:
         """Mark pending proposals that match this apply as applied. Returns
         the number of rows marked. Used to clean up the queue after a /apply

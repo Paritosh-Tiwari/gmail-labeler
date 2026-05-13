@@ -5,11 +5,54 @@ import pytest
 
 from quicklabel.headers import (
     EmailFingerprint,
+    _extract_gmail_category,
     fingerprint,
     headers_to_dict,
     parse_address,
     parse_list_id,
 )
+
+
+# --------------------------- Gmail category extraction ---------------------------
+
+@pytest.mark.parametrize("label_ids,expected", [
+    (["INBOX", "CATEGORY_PROMOTIONS"], "Promotions"),
+    (["CATEGORY_PERSONAL"], "Primary"),
+    (["CATEGORY_SOCIAL", "UNREAD"], "Social"),
+    (["CATEGORY_UPDATES"], "Updates"),
+    (["CATEGORY_FORUMS"], "Forums"),
+    (["INBOX", "IMPORTANT"], None),  # no CATEGORY_*
+    ([], None),
+    (None, None),
+])
+def test_extract_gmail_category(label_ids, expected):
+    assert _extract_gmail_category(label_ids) == expected
+
+
+def test_fingerprint_extracts_gmail_category_from_label_ids():
+    msg = {
+        "id": "m1",
+        "labelIds": ["INBOX", "CATEGORY_PROMOTIONS", "UNREAD"],
+        "payload": {"headers": [
+            {"name": "From", "value": "promo@store.com"},
+            {"name": "Subject", "value": "50% off"},
+        ]},
+    }
+    fp = fingerprint(msg)
+    assert fp.gmail_category == "Promotions"
+
+
+def test_fingerprint_gmail_category_none_when_absent():
+    msg = {
+        "id": "m1",
+        "labelIds": ["INBOX"],
+        "payload": {"headers": [
+            {"name": "From", "value": "boss@work.com"},
+            {"name": "Subject", "value": "meeting tomorrow"},
+        ]},
+    }
+    fp = fingerprint(msg)
+    assert fp.gmail_category is None
 
 
 @pytest.mark.parametrize("raw,expected", [

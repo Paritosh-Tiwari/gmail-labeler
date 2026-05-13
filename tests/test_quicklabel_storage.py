@@ -215,6 +215,38 @@ def test_apply_log_orders_newest_first(store: Storage):
     assert [e.id for e in entries] == [b, a]
 
 
+def test_get_label_usage_counts_groups_and_ignores_undone(store: Storage):
+    """Used in the LLM prompt to rank labels by how active they are."""
+    # Apply 'Finance' three times, 'Newsletters' once, then undo one Finance
+    a = store.record_apply(
+        label_name="Finance", label_id="L1", filter_query="q1", filter_id=None,
+        backprop_message_ids=[], extra_add_label_ids=[], extra_remove_label_ids=[],
+        apply_scope="future_only",
+    )
+    store.record_apply(
+        label_name="Finance", label_id="L1", filter_query="q2", filter_id=None,
+        backprop_message_ids=[], extra_add_label_ids=[], extra_remove_label_ids=[],
+        apply_scope="future_only",
+    )
+    store.record_apply(
+        label_name="Finance", label_id="L1", filter_query="q3", filter_id=None,
+        backprop_message_ids=[], extra_add_label_ids=[], extra_remove_label_ids=[],
+        apply_scope="future_only",
+    )
+    store.record_apply(
+        label_name="Newsletters", label_id="L2", filter_query="q4", filter_id=None,
+        backprop_message_ids=[], extra_add_label_ids=[], extra_remove_label_ids=[],
+        apply_scope="future_only",
+    )
+    store.mark_undone(a)
+    counts = store.get_label_usage_counts()
+    assert counts == {"Finance": 2, "Newsletters": 1}
+
+
+def test_get_label_usage_counts_empty_when_no_applies(store: Storage):
+    assert store.get_label_usage_counts() == {}
+
+
 def test_get_active_applied_filter_queries_excludes_undone(store: Storage):
     a = store.record_apply(
         label_name="A", label_id="L", filter_query="from:a@x.com", filter_id="f1",
