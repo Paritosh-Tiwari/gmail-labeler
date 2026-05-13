@@ -23,7 +23,14 @@ def _allowed_hosts(port: int) -> set[str]:
     """The Host header values we accept. Browsers send the original
     hostname (not the resolved IP), so DNS rebinding attempts arrive
     with a foreign Host like 'evil.com:8765' or 'evil.com' and get
-    rejected here even though the request landed on 127.0.0.1."""
+    rejected here even though the request landed on 127.0.0.1.
+
+    This allow-list MUST stay in sync with `settings.HOST`. The current
+    bind is loopback-only (127.0.0.1) — if HOST is ever widened to
+    0.0.0.0 or a LAN address, every external Host that can reach the
+    socket also needs to be added here, or the rebinding defense
+    silently breaks.
+    """
     return {
         f"127.0.0.1:{port}",
         f"localhost:{port}",

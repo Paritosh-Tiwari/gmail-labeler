@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import urllib.parse
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -633,7 +634,6 @@ def queue_decide(
 
     # User came from the queue; send them right back so they can keep
     # triaging. /queue reads ?applied + ?count for a one-line success banner.
-    import urllib.parse
     params = urllib.parse.urlencode({
         "applied": name,
         "count": str(len(backprop_ids)),
@@ -709,7 +709,10 @@ def label_regenerate(
     body = extract_body(msg)
     from .intelligence import _cache_key
     get_storage().clear_intel(_cache_key(email, body))
-    return RedirectResponse(url=f"/label?id={id}", status_code=303)
+    return RedirectResponse(
+        url=f"/label?id={urllib.parse.quote(id, safe='')}",
+        status_code=303,
+    )
 
 
 @app.post("/queue/regenerate")
@@ -749,7 +752,10 @@ def queue_regenerate(
     from .intelligence import _cache_key
     storage.clear_intel(_cache_key(email, body))
 
-    return RedirectResponse(url=f"/label?id={ids[0]}", status_code=303)
+    return RedirectResponse(
+        url=f"/label?id={urllib.parse.quote(ids[0], safe='')}",
+        status_code=303,
+    )
 
 
 @app.get("/proposal/{proposal_id}/full")
@@ -834,10 +840,15 @@ def history_undo(
 def setup_page(
     request: Request,
     error: str = Query(""),
-    error_title: str = Query("Setup error"),
 ):
     """One-time OAuth setup wizard. Always reachable; if QuickLabel is
-    already set up it shows the 'all set' state."""
+    already set up it shows the 'all set' state.
+
+    Note: `error` is rendered Jinja-escaped (no XSS) and is prefixed in
+    the template with a fixed "Your last setup action failed:" label so
+    an attacker who navigates the user to /setup?error=foo cannot fake
+    a security-warning banner — only a misleading failure-reason string.
+    """
     state = setup_state()
     return templates.TemplateResponse(
         request, "setup.html",
@@ -846,14 +857,16 @@ def setup_page(
             "credentials_path": str(CREDENTIALS_PATH),
             "nonce": NONCE,
             "error": error,
-            "error_title": error_title,
         },
     )
 
 
 def _setup_redirect_with_error(title: str, message: str) -> RedirectResponse:
-    import urllib.parse
-    qs = urllib.parse.urlencode({"error_title": title, "error": message})
+    # `title` is no longer rendered as a separate bold heading (closed a
+    # banner-spoofing surface); fold it into the message so internal
+    # callers still get useful failure context.
+    combined = f"{title}. {message}" if title else message
+    qs = urllib.parse.urlencode({"error": combined})
     return RedirectResponse(url=f"/setup?{qs}", status_code=303)
 
 
@@ -945,11 +958,19 @@ def setup_authorize(nonce: str = Form(...)):
     return RedirectResponse(url="/setup", status_code=303)
 
 
-@app.get("/setup/reset")
-def setup_reset():
+@app.post("/setup/reset")
+def setup_reset(nonce: str = Form(...)):
     """Drop the stored token (keeps credentials.json) so the user can
     re-authorize. Used when switching Google accounts or fixing a bad
-    consent."""
+    consent.
+
+    POST-only with nonce: a GET-triggered reset was a CSRF vector — any
+    link the user clicked that pointed here (or an <img src=...> in a
+    rendered HTML email viewed in another tab) would silently delete
+    their token.
+    """
+    if nonce != NONCE:
+        raise HTTPException(status_code=403, detail="Invalid nonce.")
     delete_token()
     global _creds_cache, _service_cache
     _creds_cache = None
