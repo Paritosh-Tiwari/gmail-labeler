@@ -75,17 +75,30 @@ def is_model_installed(name: str, client: ollama.Client | None = None) -> bool:
 def probe_model(name: str, client: ollama.Client | None = None) -> ProbeResult:
     """Send a tiny prompt and time the response. ok=True iff the model
     returned non-empty text. Used by /settings to verify that the chosen
-    model actually responds before the user commits to it."""
+    model actually responds before the user commits to it.
+
+    Reasoning models (qwen3*, gpt-oss) emit hidden <think> tokens before
+    visible output. A tiny num_predict gets burned on thinking and the
+    visible response is empty — falsely failing the probe. We apply the
+    qwen3 /no_think shim and use a generous num_predict so the probe
+    answers the question 'does this model respond at all' rather than
+    'can this model think AND respond in 8 tokens'.
+    """
     if not name or not name.strip():
         return ProbeResult(ok=False, error="No model specified")
+
+    target = name.strip()
+    user_prompt = "Reply with exactly: OK"
+    if target.lower().startswith("qwen3"):
+        user_prompt = user_prompt + "\n\n/no_think"
 
     c = client or ollama.Client()
     started = time.monotonic()
     try:
         resp = c.chat(
-            model=name.strip(),
-            messages=[{"role": "user", "content": "Reply with exactly: OK"}],
-            options={"num_predict": 8, "temperature": 0},
+            model=target,
+            messages=[{"role": "user", "content": user_prompt}],
+            options={"num_predict": 256, "temperature": 0},
         )
     except Exception as e:
         return ProbeResult(ok=False, error=str(e))

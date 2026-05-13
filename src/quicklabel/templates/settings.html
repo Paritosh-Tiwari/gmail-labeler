@@ -40,19 +40,30 @@
     <div class="card">
         <h2>LLM model</h2>
         <label for="llm_model">Ollama model name</label>
-        <input type="text" id="llm_model" name="llm_model" value="{{ settings.llm_model }}"
-               list="model_suggestions">
-        <datalist id="model_suggestions">
-            {% if installed %}
-                {% for m in installed %}
-                <option value="{{ m.name }}">{% if m.size_gb %}{{ m.size_gb }} GB installed{% endif %}</option>
-                {% endfor %}
-            {% else %}
-                <option value="gpt-oss:20b">~13 GB</option>
-                <option value="qwen2.5:7b-instruct">~5 GB</option>
-                <option value="qwen2.5:3b-instruct">~2 GB</option>
-            {% endif %}
-        </datalist>
+        <input type="text" id="llm_model" name="llm_model" value="{{ settings.llm_model }}">
+
+        {% if installed %}
+        <p class="meta" style="margin-top: 8px; margin-bottom: 4px;">
+            Installed on this machine — click to use:
+        </p>
+        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            {% for m in installed %}
+            <button type="button"
+                    onclick="document.getElementById('llm_model').value='{{ m.name }}'"
+                    style="background: white; color: var(--fg); border: 1px solid var(--border);
+                           border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+                           font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">
+                {{ m.name }}{% if m.size_gb %} <span style="color: var(--muted);">({{ m.size_gb }} GB)</span>{% endif %}
+            </button>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="meta" style="margin-top: 8px;">
+            <span style="color: #c5221f;">⚠ Ollama doesn't appear to be running</span> —
+            start it and reload this page to see installed models. You can still type a
+            name manually (e.g. <code>qwen2.5:14b-instruct-q5_K_M</code>).
+        </p>
+        {% endif %}
 
         <p style="margin-top: 10px;">
             {% if model_status == "installed" %}
