@@ -183,6 +183,81 @@ def test_parse_filter_from_subject_combines_to_query():
     assert "Weekly" in p.filter_query
 
 
+def test_parse_filter_from_keyword_uses_query_field_not_subject():
+    """from_keyword reads the 'keyword' field and produces a Gmail filter
+    that matches the keyword anywhere in the message (uses the `query`
+    criterion, not `subject`). This is the right shape for senders whose
+    subjects are one-off but whose bodies share a distinctive word."""
+    raw = json.dumps({
+        "chosen_label": "Learning/Maven", "is_new_label": True,
+        "rationale": "One-off course announcement.",
+        "filter": {"type": "from_keyword", "from": "hello@maven.com",
+                   "subject": None, "keyword": "Maven course", "list_id": None},
+        "actions": {"inbox": "keep", "importance": "default",
+                    "mark_read": False, "star": False, "never_spam": False},
+        "confidence": 0.78,
+    })
+    p = parse_llm_response(raw)
+    assert "from:hello@maven.com" in p.filter_query
+    assert '"Maven course"' in p.filter_query  # multi-word phrase quoted
+    # Filter criteria sent to Gmail uses the `query` field, NOT `subject`
+    # (subject would only match the subject line, missing keyword-in-body
+    # which is the whole point of this filter type).
+    assert p.filter_criteria.get("query") == '"Maven course"'
+    assert p.filter_criteria.get("from") == "hello@maven.com"
+    assert "subject" not in p.filter_criteria
+
+
+def test_parse_filter_from_keyword_single_word_unquoted():
+    """Single-word keywords don't need quoting in the Gmail query."""
+    raw = json.dumps({
+        "chosen_label": "Bills", "is_new_label": True, "rationale": "...",
+        "filter": {"type": "from_keyword", "from": "billing@x.com",
+                   "subject": None, "keyword": "invoice", "list_id": None},
+        "actions": {"inbox": "keep", "importance": "default",
+                    "mark_read": False, "star": False, "never_spam": False},
+        "confidence": 0.8,
+    })
+    p = parse_llm_response(raw)
+    assert p.filter_query == "from:billing@x.com invoice"
+    assert p.filter_criteria == {"from": "billing@x.com", "query": "invoice"}
+
+
+def test_build_prompt_includes_from_keyword_in_filter_type_enum():
+    """from_keyword must be discoverable in the OUTPUT schema or the LLM
+    won't ever emit it."""
+    prompt = build_prompt(
+        email=_email(), body="x", signals=_signals(),
+        sender_stats=_stats(), existing_labels=[],
+    )
+    assert "from_keyword" in prompt
+    assert "keyword" in prompt
+
+
+def test_body_excerpt_uses_head_and_tail_when_long():
+    """Long bodies get head + tail rather than head-only, so distinguishing
+    footer signals (sender brand, unsubscribe context) reach the LLM."""
+    from quicklabel.intelligence import (
+        BODY_HEAD_CHARS, BODY_TAIL_CHARS, _body_excerpt,
+    )
+    head_marker = "HEAD_MARKER_AT_TOP"
+    tail_marker = "TAIL_MARKER_AT_BOTTOM"
+    middle_filler = "x" * (BODY_HEAD_CHARS + BODY_TAIL_CHARS + 2000)
+    body = head_marker + middle_filler + tail_marker
+    excerpt = _body_excerpt(body)
+    assert head_marker in excerpt
+    assert tail_marker in excerpt
+    assert "[middle truncated]" in excerpt
+    # Bulk of the middle should be gone
+    assert len(excerpt) < len(body)
+
+
+def test_body_excerpt_returns_whole_body_when_short():
+    from quicklabel.intelligence import _body_excerpt
+    short = "Just a short message body."
+    assert _body_excerpt(short) == short
+
+
 # --------------------------- intelligent_propose end-to-end ---------------------------
 
 @pytest.fixture
