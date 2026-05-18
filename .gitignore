@@ -48,3 +48,7 @@ Thumbs.db
 
 # Personal drafts — LinkedIn posts, notes, anything not meant to be public
 private/
+
+# Personal QA / runbook docs — kept locally, not published
+docs/quicklabel-e2e-testing.md
+docs/quicklabel-manual-qa.md
