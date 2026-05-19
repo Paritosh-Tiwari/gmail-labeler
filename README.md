@@ -250,9 +250,7 @@ is a clean factory reset.
 ## One-time Google Cloud setup
 
 You need your own OAuth client (each user makes their own; nothing is
-shared with anyone). The first time you visit `/setup` (after
-installing), QuickLabel walks you through it via the in-app wizard.
-The wizard guides you through:
+shared with anyone).
 
 1. Create a project in [Google Cloud Console](https://console.cloud.google.com/)
 2. Enable the Gmail API
@@ -262,7 +260,7 @@ The wizard guides you through:
 6. Drop it onto QuickLabel's `/setup` page (drag-and-drop upload)
 7. Click **Authorize** — a browser window pops up for one-click consent
 
-If you prefer a static step-by-step guide outside the wizard, see
+If you prefer a step-by-step guide, see
 [docs/google-cloud-setup.md](docs/google-cloud-setup.md).
 
 ## Troubleshooting
