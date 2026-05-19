@@ -25,7 +25,7 @@ HOST = "127.0.0.1"
 
 DEFAULT_PORT = 8765
 _MIN_PORT, _MAX_PORT = 1024, 65535
-DEFAULT_LLM_MODEL = "gpt-oss:20b"
+DEFAULT_LLM_MODEL = "qwen2.5:14b-instruct-q5_K_M"
 DEFAULT_LOG_LEVEL = "INFO"
 
 _SETTINGS_PATH = Path(__file__).resolve().parents[2] / "data" / "settings.json"

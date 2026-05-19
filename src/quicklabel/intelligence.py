@@ -208,18 +208,18 @@ Input:
   - Newsletters
   - Learning
   NEW EMAIL TO LABEL:
-  From: Stratechery <ben@stratechery.com>
+  From: Founder Notes <editor@foundernotes.com>
   Subject: The case for vertical AI agents
   Sender history: 132 prior, no shared subject prefix
 
 Output:
 {
-  "chosen_label": "Newsletters/Stratechery",
+  "chosen_label": "Newsletters/Founder Notes",
   "is_new_label": true,
   "rationale": "Single-creator newsletter, editorial one-off subjects. Sender exclusively sends this newsletter — pin to sender. Bare domain so any future sub-address still matches.",
   "filter": {
     "type": "from",
-    "from": "stratechery.com",
+    "from": "foundernotes.com",
     "subject": null,
     "keyword": null,
     "list_id": null

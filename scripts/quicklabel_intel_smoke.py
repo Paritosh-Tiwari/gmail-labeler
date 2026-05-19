@@ -49,7 +49,7 @@ def main() -> int:
         "Personal", "Personal/Family",
     ]
 
-    _safe_print("-> Calling Ollama (default model is gpt-oss:20b; first call ~30s while it loads)")
+    _safe_print("-> Calling Ollama (default model is qwen2.5:14b-instruct-q5_K_M; first call ~30s while it loads)")
     t0 = time.time()
     p = intelligent_propose(
         email=email, body=body, signals=signals,
