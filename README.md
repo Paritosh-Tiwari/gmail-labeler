@@ -283,15 +283,6 @@ big for your VRAM -- switch to a smaller one in `/settings`.
 The bookmarklet contains a snapshot of the JS at install time. After
 updating QuickLabel, re-drag the bookmarklet from `http://127.0.0.1:8765`.
 
-## For developers
-
-See [src/quicklabel/README.md](src/quicklabel/README.md) for architecture
-notes, test setup, and contributing guidelines. Tests:
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest tests/ -q
-```
-
 ## Status
 
 Personal project. No commercial release planned. Fork freely.
